@@ -1,0 +1,28 @@
+{
+  "market": "US",
+  "ticker": "ELV",
+  "name": "Elevance Health",
+  "cik": 1156039,
+  "event_date": "2026-07-15",
+  "window": [
+    "2026-07-14",
+    "2026-07-17"
+  ],
+  "raw_return": -0.125776,
+  "index_relative": -0.114389,
+  "z_score": -3.7202,
+  "filings": [
+    {
+      "date": "2026-07-15",
+      "form": "10-Q",
+      "description": "10-Q",
+      "filing_url": "https://www.sec.gov/Archives/edgar/data/1156039/000115603926000060/elv-20260630.htm"
+    },
+    {
+      "date": "2026-07-15",
+      "form": "8-K",
+      "description": "8-K",
+      "filing_url": "https://www.sec.gov/Archives/edgar/data/1156039/000115603926000058/elv-20260715.htm"
+    }
+  ]
+}

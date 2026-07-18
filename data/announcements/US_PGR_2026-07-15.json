@@ -1,0 +1,22 @@
+{
+  "market": "US",
+  "ticker": "PGR",
+  "name": "Progressive Corporation",
+  "cik": 80661,
+  "event_date": "2026-07-15",
+  "window": [
+    "2026-07-13",
+    "2026-07-17"
+  ],
+  "raw_return": -0.113144,
+  "index_relative": -0.105473,
+  "z_score": -3.6139,
+  "filings": [
+    {
+      "date": "2026-07-15",
+      "form": "8-K",
+      "description": "8-K",
+      "filing_url": "https://www.sec.gov/Archives/edgar/data/80661/000008066126000262/pgr-20260715.htm"
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "ticker": "A1M",
+  "name": "AIC MINES LIMITED",
+  "event_date": "2026-07-16",
+  "window": [
+    "2026-07-15",
+    "2026-07-17"
+  ],
+  "raw_return": -0.257669,
+  "index_relative": -0.252175,
+  "z_score": -4.3497,
+  "announcements": [
+    {
+      "date": "2026-07-15",
+      "datetime_utc": "2026-07-15T22:38:13.000Z",
+      "headline": "June Quarterly Report",
+      "type": "QUARTERLY ACTIVITIES REPORT",
+      "price_sensitive": true,
+      "document_key": "2924-03111502-6A1334076",
+      "pdf_url": "https://asx.api.markitdigital.com/asx-research/1.0/file/2924-03111502-6A1334076?access_token=83ff96335c2d45a094df02a206a39ff4",
+      "file_size": "4652KB"
+    },
+    {
+      "date": "2026-07-14",
+      "datetime_utc": "2026-07-14T22:50:34.000Z",
+      "headline": "FY27 Guidance Conference Call Notification",
+      "type": "OTHER",
+      "price_sensitive": false,
+      "document_key": "2924-03111138-6A1333914",
+      "pdf_url": "https://asx.api.markitdigital.com/asx-research/1.0/file/2924-03111138-6A1333914?access_token=83ff96335c2d45a094df02a206a39ff4",
+      "file_size": "148KB"
+    },
+    {
+      "date": "2026-07-12",
+      "datetime_utc": "2026-07-12T22:41:56.000Z",
+      "headline": "Q4 Conference Call Notification",
+      "type": "PERIODIC REPORTS",
+      "price_sensitive": false,
+      "document_key": "2924-03110242-6A1333530",
+      "pdf_url": "https://asx.api.markitdigital.com/asx-research/1.0/file/2924-03110242-6A1333530?access_token=83ff96335c2d45a094df02a206a39ff4",
+      "file_size": "139KB"
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "market": "US",
+  "ticker": "ISRG",
+  "name": "Intuitive Surgical",
+  "cik": 1035267,
+  "event_date": "2026-07-17",
+  "window": [
+    "2026-07-16",
+    "2026-07-17"
+  ],
+  "raw_return": -0.141451,
+  "index_relative": -0.131352,
+  "z_score": -6.546,
+  "filings": [
+    {
+      "date": "2026-07-16",
+      "form": "8-K",
+      "description": "8-K",
+      "filing_url": "https://www.sec.gov/Archives/edgar/data/1035267/000103526726000047/isrg-20260716.htm"
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "market": "US",
+  "ticker": "CDNS",
+  "name": "Cadence Design Systems",
+  "cik": 813672,
+  "event_date": "2026-07-17",
+  "window": [
+    "2026-07-14",
+    "2026-07-17"
+  ],
+  "raw_return": -0.123912,
+  "index_relative": -0.112525,
+  "z_score": -2.6986,
+  "filings": []
+}

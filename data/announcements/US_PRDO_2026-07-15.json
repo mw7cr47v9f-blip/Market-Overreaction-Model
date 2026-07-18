@@ -1,0 +1,15 @@
+{
+  "market": "US",
+  "ticker": "PRDO",
+  "name": "Perdoceo Education Corp.",
+  "cik": 1046568,
+  "event_date": "2026-07-15",
+  "window": [
+    "2026-07-14",
+    "2026-07-17"
+  ],
+  "raw_return": -0.128304,
+  "index_relative": -0.127447,
+  "z_score": -3.6895,
+  "filings": []
+}

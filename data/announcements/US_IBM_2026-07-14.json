@@ -1,0 +1,22 @@
+{
+  "market": "US",
+  "ticker": "IBM",
+  "name": "IBM",
+  "cik": 51143,
+  "event_date": "2026-07-14",
+  "window": [
+    "2026-07-13",
+    "2026-07-17"
+  ],
+  "raw_return": -0.267236,
+  "index_relative": -0.259565,
+  "z_score": -4.3008,
+  "filings": [
+    {
+      "date": "2026-07-14",
+      "form": "8-K",
+      "description": "8-K",
+      "filing_url": "https://www.sec.gov/Archives/edgar/data/51143/000005114326000070/ibm-20260714.htm"
+    }
+  ]
+}

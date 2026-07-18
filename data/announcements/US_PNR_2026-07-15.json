@@ -1,0 +1,22 @@
+{
+  "market": "US",
+  "ticker": "PNR",
+  "name": "Pentair",
+  "cik": 77360,
+  "event_date": "2026-07-15",
+  "window": [
+    "2026-07-14",
+    "2026-07-17"
+  ],
+  "raw_return": -0.174815,
+  "index_relative": -0.173958,
+  "z_score": -5.1123,
+  "filings": [
+    {
+      "date": "2026-07-14",
+      "form": "8-K",
+      "description": "8-K",
+      "filing_url": "https://www.sec.gov/Archives/edgar/data/77360/000007736026000039/pnr-20260710.htm"
+    }
+  ]
+}
