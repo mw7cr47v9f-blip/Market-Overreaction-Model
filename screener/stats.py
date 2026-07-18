@@ -17,6 +17,8 @@ import pandas as pd
 
 @dataclass
 class Candidate:
+    market: str
+    currency: str
     ticker: str
     name: str
     market_cap: float
@@ -39,8 +41,9 @@ class Candidate:
 
     def key(self) -> str:
         """Dedup identity: a given crash day for a given stock is ONE event,
-        no matter how many rolling windows still contain it on later days."""
-        return f"{self.ticker}:{self.event_date}"
+        no matter how many rolling windows still contain it on later days.
+        Namespaced by market so an ASX and a US ticker can't collide."""
+        return f"{self.market}:{self.ticker}:{self.event_date}"
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -153,6 +156,8 @@ def evaluate_series(
     best = min(qualifying, key=lambda q: q["z_score"])
 
     return Candidate(
+        market=getattr(cfg, "MARKET", "ASX"),
+        currency=getattr(cfg, "CURRENCY", "AUD"),
         ticker=ticker,
         name=name,
         market_cap=float(market_cap),

@@ -1,12 +1,10 @@
 """
-Data access layer. Runs on GitHub Actions runners, which have unrestricted
-internet (unlike the Claude cloud sandbox). Nothing here is expected to work
-from inside a Claude session — that's the whole reason the screen runs on
-Actions and commits results back for Claude to read.
+Data access layer. Runs on GitHub Actions runners (unrestricted internet).
+Dispatches per market for the universe, prices, benchmarks and market caps.
 
-Sources used here are for CANDIDATE GENERATION ONLY (Step 1). Per the brief,
-non-primary price data is fine for generating the candidate list; every factual
-claim about a company in Steps 2-3 is made from primary sources separately.
+Sources here are for CANDIDATE GENERATION ONLY (Step 1) — non-primary price
+data is fine for that. Every company FACT in Steps 2-3 is taken from primary
+sources separately (ASX platform / SEC EDGAR + company IR).
 """
 from __future__ import annotations
 
@@ -25,51 +23,46 @@ def log(msg: str):
 
 
 # --------------------------------------------------------------------------
-# Universe: every ASX-listed code. The >= $100m cap filter is applied later,
-# only to price-qualifying names, so here we just need the full code list.
+# Universe — dispatch on mcfg.UNIVERSE. Returns DataFrame[code, name, yahoo].
 # --------------------------------------------------------------------------
 
+def get_universe(mcfg, local_fallback: Optional[str] = None) -> pd.DataFrame:
+    kind = getattr(mcfg, "UNIVERSE", "asx_directory")
+    if kind == "asx_directory":
+        return _asx_universe(local_fallback)
+    if kind == "sp1500":
+        return _sp1500_universe(local_fallback)
+    raise ValueError(f"Unknown universe source: {kind}")
+
+
+# ---- ASX: the exchange's own listed-companies directory ------------------
+
 _ASX_DIRECTORY_URLS = [
-    # ASX's own listed-companies file has moved over the years; try the known
-    # locations in order. If all fail, we fall back to a committed universe.csv.
     "https://www.asx.com.au/asx/research/ASXListedCompanies.csv",
     "https://asx.api.markitdigital.com/asx-research/1.0/companies/directory/file"
     "?access_token=83ff96335c2d45a094df02a206a39ff4",
 ]
 
 
-def get_universe(local_fallback: Optional[str] = None) -> pd.DataFrame:
-    """Return DataFrame[code, name, yahoo]. code = plain ASX code (e.g. 'CBA')."""
+def _asx_universe(local_fallback: Optional[str]) -> pd.DataFrame:
     import requests
-
     for url in _ASX_DIRECTORY_URLS:
         try:
-            log(f"fetching ASX directory: {url[:60]}...")
+            log(f"ASX directory: {url[:60]}...")
             r = requests.get(url, timeout=45, headers={"User-Agent": "Mozilla/5.0"})
             r.raise_for_status()
-            df = _parse_directory(r.content)
+            df = _parse_asx_directory(r.content)
             if df is not None and len(df) > 500:
-                log(f"universe: {len(df)} codes from ASX directory")
+                log(f"ASX universe: {len(df)} codes")
                 return df
         except Exception as e:  # noqa: BLE001
-            log(f"  directory source failed: {e!r}")
-
+            log(f"  source failed: {e!r}")
     if local_fallback:
-        log(f"falling back to committed universe file: {local_fallback}")
-        df = pd.read_csv(local_fallback)
-        df.columns = [c.strip().lower() for c in df.columns]
-        code_col = "code" if "code" in df.columns else df.columns[0]
-        name_col = "name" if "name" in df.columns else df.columns[1]
-        out = pd.DataFrame({"code": df[code_col].astype(str).str.upper().str.strip(),
-                            "name": df[name_col].astype(str).str.strip()})
-        out["yahoo"] = out["code"] + ".AX"
-        return out.drop_duplicates("code").reset_index(drop=True)
-
-    raise RuntimeError("Could not obtain ASX universe from any source and no local fallback given.")
+        return _local_universe(local_fallback, ".AX")
+    raise RuntimeError("Could not obtain ASX universe and no local fallback given.")
 
 
-def _parse_directory(content: bytes) -> Optional[pd.DataFrame]:
-    """Handle both the old CSV layout and the markitdigital CSV export."""
+def _parse_asx_directory(content: bytes) -> Optional[pd.DataFrame]:
     for skip in (0, 1, 2, 3):
         try:
             df = pd.read_csv(io.BytesIO(content), skiprows=skip)
@@ -89,18 +82,68 @@ def _parse_directory(content: bytes) -> Optional[pd.DataFrame]:
     return None
 
 
+# ---- US: the S&P 1500 (S&P 500 + 400 + 600), from Wikipedia --------------
+
+_SP_PAGES = [
+    ("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies", "Symbol", "Security"),
+    ("https://en.wikipedia.org/wiki/List_of_S%26P_400_companies", "Symbol", "Security"),
+    ("https://en.wikipedia.org/wiki/List_of_S%26P_600_companies", "Symbol", "Company"),
+]
+
+
+def _sp1500_universe(local_fallback: Optional[str]) -> pd.DataFrame:
+    import requests
+    frames = []
+    for url, sym_col, name_col in _SP_PAGES:
+        try:
+            html = requests.get(url, timeout=45, headers={"User-Agent": "Mozilla/5.0"}).text
+            tables = pd.read_html(io.StringIO(html))
+            # pick the constituents table = the one carrying the symbol column
+            for t in tables:
+                cols = {str(c).strip().lower(): c for c in t.columns}
+                sc = next((cols[k] for k in cols if k in ("symbol", "ticker symbol", "ticker")), None)
+                nc = next((cols[k] for k in cols if k in ("security", "company", "name")), None)
+                if sc is not None and len(t) > 50:
+                    sub = pd.DataFrame({
+                        "code": t[sc].astype(str).str.upper().str.strip(),
+                        "name": (t[nc].astype(str).str.strip() if nc is not None else t[sc].astype(str)),
+                    })
+                    frames.append(sub)
+                    log(f"US {url.split('List_of_')[1][:12]}: {len(sub)} names")
+                    break
+        except Exception as e:  # noqa: BLE001
+            log(f"  S&P page failed ({url[-20:]}): {e!r}")
+    if not frames:
+        if local_fallback:
+            return _local_universe(local_fallback, "")
+        raise RuntimeError("Could not obtain US universe (S&P 1500) and no local fallback given.")
+    out = pd.concat(frames, ignore_index=True)
+    out = out[out["code"].str.match(r"^[A-Z][A-Z0-9.\-]{0,6}$", na=False)]
+    # Yahoo uses '-' where the ticker has a class suffix (BRK.B -> BRK-B)
+    out["yahoo"] = out["code"].str.replace(".", "-", regex=False)
+    out = out.drop_duplicates("code").reset_index(drop=True)
+    log(f"US universe (S&P 1500): {len(out)} names")
+    return out
+
+
+def _local_universe(path: str, suffix: str) -> pd.DataFrame:
+    df = pd.read_csv(path)
+    df.columns = [c.strip().lower() for c in df.columns]
+    code_col = "code" if "code" in df.columns else df.columns[0]
+    name_col = "name" if "name" in df.columns else df.columns[min(1, len(df.columns) - 1)]
+    out = pd.DataFrame({"code": df[code_col].astype(str).str.upper().str.strip(),
+                        "name": df[name_col].astype(str).str.strip()})
+    out["yahoo"] = (out["code"] + suffix) if suffix else out["code"].str.replace(".", "-", regex=False)
+    return out.drop_duplicates("code").reset_index(drop=True)
+
+
 # --------------------------------------------------------------------------
-# Prices: one bulk download for the whole universe + the benchmark indices.
+# Prices, benchmarks, market caps (market-agnostic; operate on yahoo tickers)
 # --------------------------------------------------------------------------
 
 def download_prices(yahoo_tickers: list[str], period_days: int = cfg.HISTORY_CALENDAR_DAYS
                     ) -> dict[str, pd.DataFrame]:
-    """Return {yahoo_ticker: DataFrame[Close, Volume]} indexed by date.
-
-    Uses yfinance in batches with retries. Missing/failed tickers are skipped.
-    """
     import yfinance as yf
-
     out: dict[str, pd.DataFrame] = {}
     batch = 200
     period = f"{max(period_days, 120)}d"
@@ -126,10 +169,7 @@ def _unpack(data: pd.DataFrame, chunk: list[str], out: dict):
         return
     for t in chunk:
         try:
-            if isinstance(data.columns, pd.MultiIndex):
-                sub = data[t]
-            else:
-                sub = data  # single ticker
+            sub = data[t] if isinstance(data.columns, pd.MultiIndex) else data
             df = sub[["Close", "Volume"]].dropna(how="all")
             if len(df) >= cfg.MIN_VOL_OBS:
                 out[t] = df
@@ -137,10 +177,10 @@ def _unpack(data: pd.DataFrame, chunk: list[str], out: dict):
             continue
 
 
-def download_benchmarks(period_days: int = cfg.HISTORY_CALENDAR_DAYS) -> dict[str, pd.Series]:
+def download_benchmarks(mcfg, period_days: int = cfg.HISTORY_CALENDAR_DAYS) -> dict[str, pd.Series]:
     import yfinance as yf
     out = {}
-    for b in (cfg.BENCHMARK_200, cfg.BENCHMARK_300):
+    for b in (mcfg.BENCHMARK_200, mcfg.BENCHMARK_300):
         try:
             d = yf.download(b, period=f"{max(period_days,120)}d", interval="1d",
                             auto_adjust=False, progress=False)
@@ -151,9 +191,6 @@ def download_benchmarks(period_days: int = cfg.HISTORY_CALENDAR_DAYS) -> dict[st
 
 
 def get_market_caps(yahoo_tickers: list[str]) -> dict[str, float]:
-    """Fetch market cap (AUD) for a SMALL shortlist of price-qualifying names.
-    Only called on the handful that clear the price screen, so per-ticker
-    .fast_info calls are cheap."""
     import yfinance as yf
     caps: dict[str, float] = {}
     for t in yahoo_tickers:

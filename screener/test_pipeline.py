@@ -51,12 +51,12 @@ CAPS = {"AAA.AX": 800_000_000, "BIG.AX": 12_000_000_000, "SML.AX": 50_000_000}
 
 
 def install(monkey):
-    monkey["get_universe"] = datamod.get_universe
-    datamod.get_universe = lambda local_fallback=None: UNIVERSE.copy()
+    datamod.get_universe = lambda mcfg, local_fallback=None: UNIVERSE.copy()
     datamod.download_prices = lambda tickers, period_days=cfg.HISTORY_CALENDAR_DAYS: {
         k: v for k, v in PRICES.items() if k in tickers}
-    datamod.download_benchmarks = lambda period_days=cfg.HISTORY_CALENDAR_DAYS: BENCHES
+    datamod.download_benchmarks = lambda mcfg, period_days=cfg.HISTORY_CALENDAR_DAYS: BENCHES
     datamod.get_market_caps = lambda tickers: {k: v for k, v in CAPS.items() if k in tickers}
+    runmod._fetch_announcements = lambda *a, **k: None   # no network in the test
 
 
 passed = 0
@@ -68,7 +68,7 @@ def check(name, cond):
 
 
 def run_once(data_dir):
-    sys.argv = ["run", "--data-dir", data_dir]
+    sys.argv = ["run", "--data-dir", data_dir, "--markets", "ASX"]
     runmod.main()
 
 
