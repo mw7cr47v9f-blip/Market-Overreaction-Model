@@ -2,7 +2,7 @@ name: ASX overreaction daily screen
 
 on:
   schedule:
-    - cron: "0 8 * * 1-5"
+    - cron: "30 7 * * 1-5"
   workflow_dispatch: {}
 
 permissions:
