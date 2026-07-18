@@ -1,0 +1,49 @@
+{
+  "ticker": "MSB",
+  "name": "MESOBLAST LIMITED",
+  "event_date": "2026-07-17",
+  "window": [
+    "2026-07-16",
+    "2026-07-17"
+  ],
+  "raw_return": -0.119134,
+  "index_relative": -0.113606,
+  "z_score": -3.5861,
+  "announcements": [
+    {
+      "date": "2026-07-14",
+      "headline": null,
+      "price_sensitive": false,
+      "pdf_url": null,
+      "pages": null
+    },
+    {
+      "date": "2026-07-14",
+      "headline": null,
+      "price_sensitive": false,
+      "pdf_url": null,
+      "pages": null
+    },
+    {
+      "date": "2026-07-14",
+      "headline": null,
+      "price_sensitive": false,
+      "pdf_url": null,
+      "pages": null
+    },
+    {
+      "date": "2026-07-14",
+      "headline": null,
+      "price_sensitive": false,
+      "pdf_url": null,
+      "pages": null
+    },
+    {
+      "date": "2026-07-14",
+      "headline": null,
+      "price_sensitive": false,
+      "pdf_url": null,
+      "pages": null
+    }
+  ]
+}

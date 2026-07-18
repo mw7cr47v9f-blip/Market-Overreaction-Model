@@ -1,0 +1,35 @@
+{
+  "ticker": "A1M",
+  "name": "AIC MINES LIMITED",
+  "event_date": "2026-07-16",
+  "window": [
+    "2026-07-15",
+    "2026-07-17"
+  ],
+  "raw_return": -0.257669,
+  "index_relative": -0.252175,
+  "z_score": -4.3497,
+  "announcements": [
+    {
+      "date": "2026-07-15",
+      "headline": null,
+      "price_sensitive": true,
+      "pdf_url": null,
+      "pages": null
+    },
+    {
+      "date": "2026-07-14",
+      "headline": null,
+      "price_sensitive": false,
+      "pdf_url": null,
+      "pages": null
+    },
+    {
+      "date": "2026-07-12",
+      "headline": null,
+      "price_sensitive": false,
+      "pdf_url": null,
+      "pages": null
+    }
+  ]
+}

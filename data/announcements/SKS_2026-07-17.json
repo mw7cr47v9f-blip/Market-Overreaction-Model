@@ -1,0 +1,21 @@
+{
+  "ticker": "SKS",
+  "name": "SKS TECHNOLOGIES GROUP LIMITED",
+  "event_date": "2026-07-17",
+  "window": [
+    "2026-07-16",
+    "2026-07-17"
+  ],
+  "raw_return": -0.107791,
+  "index_relative": -0.102263,
+  "z_score": -2.6055,
+  "announcements": [
+    {
+      "date": "2026-07-13",
+      "headline": null,
+      "price_sensitive": true,
+      "pdf_url": null,
+      "pages": null
+    }
+  ]
+}
