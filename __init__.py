@@ -1,173 +1,75 @@
 """
-Pure statistical core of the overreaction screen.
+Configuration for the ASX overreaction screen.
 
-No I/O here — every function takes plain pandas objects and returns plain data,
-so the logic can be unit-tested against synthetic series with known answers
-(see run.py --self-test). This is where correctness actually matters.
+Every threshold below is a deliberate choice flagged in the README. Adjust here
+and the whole pipeline follows. Keegan: these are the knobs to turn if the feed
+is too noisy (tighten) or too quiet (loosen).
 """
-from __future__ import annotations
 
-import math
-from dataclasses import dataclass, asdict
-from typing import Optional
+# ---- Step 1: statistical screen thresholds -------------------------------
 
-import numpy as np
-import pandas as pd
+# Condition 1 — statistical extremity.
+# Window return must be at least this many standard deviations below zero,
+# where sigma is the stock's own trailing daily volatility scaled to the window
+# length. Spec says 2.5-3.0. We default to 2.5 (more inclusive); tighten to 3.0
+# to cut the list down.
+Z_THRESHOLD = -2.5
 
+# Condition 2 — index-relative underperformance.
+# Window return must underperform the benchmark index over the SAME window by at
+# least this many percentage points (0.10 = 10pp). Excludes broad selloffs.
+INDEX_REL_THRESHOLD = -0.10
 
-@dataclass
-class Candidate:
-    ticker: str
-    name: str
-    market_cap: float
-    benchmark: str
-    # the most statistically extreme qualifying window:
-    window_len: int
-    window_start: str      # ISO date (first day of the decline window)
-    window_end: str        # ISO date (= run date)
-    event_date: str        # ISO date of the single worst day inside the window
-    raw_return: float      # window return, e.g. -0.18
-    index_return: float    # benchmark window return
-    index_relative: float  # raw_return - index_return
-    z_score: float         # raw_return / (daily_sigma * sqrt(window_len))
-    daily_sigma: float     # trailing daily volatility used
-    avg_daily_value: float # trailing average traded value (AUD)
-    last_close: float
-    # also record the single largest-drop window for the economics narrative:
-    max_drop_window_len: int
-    max_drop_return: float
+# Condition 3 — absolute floor.
+# Raw window decline must be at least this large (0.10 = 10%). Keeps out
+# statistically-extreme-but-trivial moves in very quiet stocks. This floor is
+# also WHY we never need to scan the whole 2000-stock universe for the drop
+# itself — anything that qualifies is, by definition, a large faller.
+ABS_DROP_THRESHOLD = -0.10
 
-    def key(self) -> str:
-        """Dedup identity: a given crash day for a given stock is ONE event,
-        no matter how many rolling windows still contain it on later days."""
-        return f"{self.ticker}:{self.event_date}"
+# Rolling windows to evaluate, in trading days. Spec: "5 trading days or less".
+# We test every window length 1..5 ending on the run date and flag if ANY of
+# them qualifies, reporting the most statistically extreme one.
+WINDOW_LENGTHS = [1, 2, 3, 4, 5]
 
-    def to_dict(self) -> dict:
-        return asdict(self)
+# Trailing sample for the volatility baseline, in trading days (~90).
+# Critically, the volatility is computed from returns STRICTLY BEFORE the
+# evaluation window, so the crash itself doesn't inflate its own baseline.
+VOL_LOOKBACK = 90
 
+# Minimum number of trailing daily returns required to compute a trustworthy
+# volatility. Stocks with less history (recent listings) are skipped and logged.
+MIN_VOL_OBS = 40
 
-def daily_returns(close: pd.Series) -> pd.Series:
-    return close.sort_index().pct_change()
+# ---- Universe / size / liquidity filters ---------------------------------
 
+# Minimum market capitalisation in AUD. Spec: >= $100m.
+MIN_MARKET_CAP = 100_000_000
 
-def _window_return(close: pd.Series, i_end: int, w: int) -> Optional[float]:
-    i_start = i_end - w
-    if i_start < 0:
-        return None
-    c0 = close.iloc[i_start]
-    c1 = close.iloc[i_end]
-    if c0 is None or c1 is None or c0 <= 0 or np.isnan(c0) or np.isnan(c1):
-        return None
-    return c1 / c0 - 1.0
+# Liquidity floor: minimum average daily traded value (close * volume) over the
+# trailing VOL_LOOKBACK window, in AUD. Spec suggested $50k-$100k or bottom
+# decile. We use a fixed, slightly conservative $150k/day so a flagged move
+# can't be an artefact of a handful of thin trades. Flagged in README.
+MIN_AVG_DAILY_VALUE = 150_000
 
+# ---- Benchmarks ----------------------------------------------------------
 
-def evaluate_series(
-    ticker: str,
-    name: str,
-    close: pd.Series,
-    volume: pd.Series,
-    bench_close: pd.Series,
-    market_cap: float,
-    cfg,
-) -> Optional[Candidate]:
-    """
-    Evaluate one stock on its latest trading day. Returns a Candidate if any
-    window of length 1..max qualifies on all three conditions, else None.
+# Yahoo tickers for the ASX price indices.
+#   ^AXJO = S&P/ASX 200, ^AXKO = S&P/ASX 300
+# Large caps (market cap >= LARGE_CAP_CUTOFF) are benchmarked against the ASX
+# 200; everything else against the ASX 300, per the spec's "whichever is more
+# appropriate for its size".
+BENCHMARK_200 = "^AXJO"
+BENCHMARK_300 = "^AXKO"
+LARGE_CAP_CUTOFF = 5_000_000_000  # $5bn: above this, use ASX 200
 
-    `close`, `volume` are indexed by trading-day Timestamp (ascending).
-    `bench_close` is the benchmark index close, indexed by Timestamp.
-    `market_cap` in AUD (pre-computed by the caller).
-    """
-    close = close.dropna().sort_index()
-    if len(close) < cfg.MIN_VOL_OBS + max(cfg.WINDOW_LENGTHS) + 2:
-        return None
+# ---- Data window ---------------------------------------------------------
 
-    # Size filter.
-    if market_cap is None or market_cap < cfg.MIN_MARKET_CAP:
-        return None
+# Calendar days of history to download so we have >= VOL_LOOKBACK + 5 trading
+# days after weekends/holidays. 200 calendar days comfortably covers ~135
+# trading days.
+HISTORY_CALENDAR_DAYS = 200
 
-    # Liquidity filter: average traded value over the trailing vol window.
-    traded_value = (close * volume.reindex(close.index)).dropna()
-    adv = float(traded_value.tail(cfg.VOL_LOOKBACK).mean()) if len(traded_value) else 0.0
-    if adv < cfg.MIN_AVG_DAILY_VALUE:
-        return None
-
-    rets = daily_returns(close)
-    i_end = len(close) - 1
-    run_date = close.index[i_end]
-
-    # Align benchmark onto the stock's trading calendar.
-    bench = bench_close.dropna().sort_index().reindex(close.index).ffill()
-
-    qualifying = []
-    max_drop = (None, 0.0)  # (window_len, return) — most negative raw drop seen
-
-    for w in cfg.WINDOW_LENGTHS:
-        r = _window_return(close, i_end, w)
-        if r is None:
-            continue
-        if r < max_drop[1]:
-            max_drop = (w, r)
-
-        # Trailing daily vol from returns STRICTLY BEFORE the window starts, so
-        # the crash cannot inflate its own baseline.
-        i_win_start = i_end - w
-        baseline = rets.iloc[:i_win_start].dropna().tail(cfg.VOL_LOOKBACK)
-        if len(baseline) < cfg.MIN_VOL_OBS:
-            continue
-        daily_sigma = float(baseline.std(ddof=1))
-        if daily_sigma <= 0 or math.isnan(daily_sigma):
-            continue
-        window_sigma = daily_sigma * math.sqrt(w)
-        z = r / window_sigma
-
-        # Benchmark return over the same window.
-        b0, b1 = bench.iloc[i_win_start], bench.iloc[i_end]
-        if b0 is None or np.isnan(b0) or b0 <= 0:
-            continue
-        bench_r = b1 / b0 - 1.0
-        index_rel = r - bench_r
-
-        cond1 = z <= cfg.Z_THRESHOLD
-        cond2 = index_rel <= cfg.INDEX_REL_THRESHOLD
-        cond3 = r <= cfg.ABS_DROP_THRESHOLD
-        if cond1 and cond2 and cond3:
-            # worst single day inside the window -> event anchor
-            win_rets = rets.iloc[i_win_start + 1: i_end + 1]
-            event_date = win_rets.idxmin() if len(win_rets) else close.index[i_win_start + 1]
-            qualifying.append(dict(
-                window_len=w,
-                window_start=close.index[i_win_start],
-                event_date=event_date,
-                raw_return=r,
-                index_return=bench_r,
-                index_relative=index_rel,
-                z_score=z,
-                daily_sigma=daily_sigma,
-            ))
-
-    if not qualifying:
-        return None
-
-    # Headline window = most statistically extreme (lowest z).
-    best = min(qualifying, key=lambda q: q["z_score"])
-
-    return Candidate(
-        ticker=ticker,
-        name=name,
-        market_cap=float(market_cap),
-        benchmark=(cfg.BENCHMARK_200 if market_cap >= cfg.LARGE_CAP_CUTOFF else cfg.BENCHMARK_300),
-        window_len=best["window_len"],
-        window_start=best["window_start"].date().isoformat(),
-        window_end=run_date.date().isoformat(),
-        event_date=best["event_date"].date().isoformat(),
-        raw_return=round(best["raw_return"], 6),
-        index_return=round(best["index_return"], 6),
-        index_relative=round(best["index_relative"], 6),
-        z_score=round(best["z_score"], 4),
-        daily_sigma=round(best["daily_sigma"], 6),
-        avg_daily_value=round(adv, 2),
-        last_close=round(float(close.iloc[i_end]), 6),
-        max_drop_window_len=int(max_drop[0]) if max_drop[0] else best["window_len"],
-        max_drop_return=round(float(max_drop[1]), 6),
-    )
+# ---- Currency ------------------------------------------------------------
+# yfinance returns ASX prices in AUD already; kept explicit for clarity.
+CURRENCY = "AUD"

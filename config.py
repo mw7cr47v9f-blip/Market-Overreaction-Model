@@ -1,105 +1,74 @@
 """
-Offline integration test of the orchestrator: monkeypatches the network layer
-with synthetic data and checks the full stage1 -> stage2 -> dedup -> file-output
-wiring, including that a second run correctly dedups. Run:
-    python -m screener.test_pipeline
+Best-effort ASX announcement capture for each new candidate.
+
+Runs on the GitHub Actions runner (full internet). For every new candidate it
+pulls the company's recent announcements from the ASX platform around the event
+date and writes them to data/announcements/<TICKER>_<eventdate>.json, including
+the price-sensitive flag and the PDF URL. The daily Claude task then reads these
+as the STARTING POINT for the primary-source analysis (it still opens the actual
+announcement / the company's own results release before making any claim).
+
+If the endpoint shape changes, this fails soft — the screen still produces
+candidates; only the pre-fetched announcement convenience list is missing.
 """
+from __future__ import annotations
+
 import json
 import os
 import sys
-import tempfile
+from datetime import date, timedelta
 
-import numpy as np
-import pandas as pd
-
-from screener import data as datamod
-from screener import config as cfg
-from screener import run as runmod
+ASX_ANN_URL = ("https://asx.api.markitdigital.com/asx-research/1.0/companies/"
+               "{code}/announcements?pageSize=30&access_token="
+               "83ff96335c2d45a094df02a206a39ff4")
 
 
-def _dates(n):
-    return pd.bdate_range("2026-01-01", periods=n)
-
-def _quiet(n, vol, start=10.0, seed=0):
-    rng = np.random.default_rng(seed)
-    r = rng.normal(0, vol, n); r[0] = 0
-    return start * np.cumprod(1 + r)
-
-def _crash_last(arr, pct):
-    arr = arr.copy(); arr[-1] *= (1 + pct); return arr
-
-N = 140
-IDX = _dates(N)
-
-def _df(close, vol_shares):
-    return pd.DataFrame({"Close": close, "Volume": np.full(N, vol_shares)}, index=IDX)
-
-UNIVERSE = pd.DataFrame({
-    "code": ["AAA", "BIG", "SML", "CALM"],
-    "name": ["Alpha Ltd", "Big Cap Ltd", "Small Ltd", "Calm Ltd"],
-    "yahoo": ["AAA.AX", "BIG.AX", "SML.AX", "CALM.AX"],
-})
-PRICES = {
-    "AAA.AX":  _df(_crash_last(_quiet(N, 0.01, seed=1), -0.18), 5_000_000),   # mid cap crash
-    "BIG.AX":  _df(_crash_last(_quiet(N, 0.01, seed=2), -0.15), 5_000_000),   # large cap crash
-    "SML.AX":  _df(_crash_last(_quiet(N, 0.01, seed=3), -0.18), 5_000_000),   # sub-$100m -> drop
-    "CALM.AX": _df(_quiet(N, 0.01, seed=4), 5_000_000),                       # no crash
-}
-BENCHES = {cfg.BENCHMARK_200: pd.Series(_quiet(N, 0.003, 7000, 99), index=IDX),
-           cfg.BENCHMARK_300: pd.Series(_quiet(N, 0.003, 7000, 98), index=IDX)}
-CAPS = {"AAA.AX": 800_000_000, "BIG.AX": 12_000_000_000, "SML.AX": 50_000_000}
+def log(msg: str):
+    print(f"[announce] {msg}", file=sys.stderr, flush=True)
 
 
-def install(monkey):
-    monkey["get_universe"] = datamod.get_universe
-    datamod.get_universe = lambda local_fallback=None: UNIVERSE.copy()
-    datamod.download_prices = lambda tickers, period_days=cfg.HISTORY_CALENDAR_DAYS: {
-        k: v for k, v in PRICES.items() if k in tickers}
-    datamod.download_benchmarks = lambda period_days=cfg.HISTORY_CALENDAR_DAYS: BENCHES
-    datamod.get_market_caps = lambda tickers: {k: v for k, v in CAPS.items() if k in tickers}
+def fetch_for_candidates(candidates, data_dir: str, window_days: int = 7):
+    import requests
+    out_dir = os.path.join(data_dir, "announcements")
+    os.makedirs(out_dir, exist_ok=True)
+
+    for c in candidates:
+        try:
+            ev = date.fromisoformat(c.event_date)
+            lo, hi = ev - timedelta(days=window_days), ev + timedelta(days=2)
+            url = ASX_ANN_URL.format(code=c.ticker)
+            r = requests.get(url, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
+            r.raise_for_status()
+            payload = r.json()
+            items = payload.get("data", {}).get("items", payload.get("data", []))
+            near = []
+            for a in items:
+                ad = _parse_date(a.get("documentDate") or a.get("date") or "")
+                if ad and lo <= ad <= hi:
+                    near.append({
+                        "date": ad.isoformat(),
+                        "headline": a.get("header") or a.get("title"),
+                        "price_sensitive": bool(a.get("isPriceSensitive") or a.get("marketSensitive")),
+                        "pdf_url": a.get("url") or a.get("pdfUrl"),
+                        "pages": a.get("pageCount") or a.get("numberOfPages"),
+                    })
+            rec = {
+                "ticker": c.ticker, "name": c.name, "event_date": c.event_date,
+                "window": [c.window_start, c.window_end],
+                "raw_return": c.raw_return, "index_relative": c.index_relative,
+                "z_score": c.z_score, "announcements": near,
+            }
+            path = os.path.join(out_dir, f"{c.ticker}_{c.event_date}.json")
+            with open(path, "w") as f:
+                json.dump(rec, f, indent=2)
+            log(f"{c.ticker}: {len(near)} announcement(s) near {c.event_date}")
+        except Exception as e:  # noqa: BLE001
+            log(f"{c.ticker}: announcement fetch failed: {e!r}")
 
 
-passed = 0
-def check(name, cond):
-    global passed
-    assert cond, f"FAILED: {name}"
-    passed += 1
-    print(f"  ok  {name}")
-
-
-def run_once(data_dir):
-    sys.argv = ["run", "--data-dir", data_dir]
-    runmod.main()
-
-
-def main():
-    install({})
-    with tempfile.TemporaryDirectory() as d:
-        print("First run:")
-        run_once(d)
-        new = json.load(open(os.path.join(d, "candidates_new.json")))
-        tickers = {c["ticker"] for c in new["candidates"]}
-        check("AAA (mid-cap crash) flagged", "AAA" in tickers)
-        check("BIG (large-cap crash) flagged", "BIG" in tickers)
-        check("SML (sub-$100m) NOT flagged", "SML" not in tickers)
-        check("CALM (no crash) NOT flagged", "CALM" not in tickers)
-        big = next(c for c in new["candidates"] if c["ticker"] == "BIG")
-        check("BIG benchmarked vs ASX200", big["benchmark"] == cfg.BENCHMARK_200)
-        aaa = next(c for c in new["candidates"] if c["ticker"] == "AAA")
-        check("AAA benchmarked vs ASX300", aaa["benchmark"] == cfg.BENCHMARK_300)
-        allcsv = pd.read_csv(os.path.join(d, "candidates_all.csv"))
-        check("candidates_all.csv has status=New", (allcsv["status"] == "New").all())
-        check("state.json records seen keys", len(json.load(open(os.path.join(d, "state.json")))["seen"]) == 2)
-
-        print("Second run (same data) — must dedup to zero new:")
-        run_once(d)
-        new2 = json.load(open(os.path.join(d, "candidates_new.json")))
-        check("second run emits 0 new (dedup works)", new2["count"] == 0)
-        allcsv2 = pd.read_csv(os.path.join(d, "candidates_all.csv"))
-        check("candidates_all.csv unchanged on dedup run", len(allcsv2) == len(allcsv))
-
-    print(f"\nALL {passed} PIPELINE ASSERTIONS PASSED")
-
-
-if __name__ == "__main__":
-    main()
+def _parse_date(s: str):
+    s = str(s)[:10]
+    try:
+        return date.fromisoformat(s)
+    except Exception:  # noqa: BLE001
+        return None
