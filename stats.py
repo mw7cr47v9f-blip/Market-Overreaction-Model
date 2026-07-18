@@ -1,0 +1,49 @@
+name: ASX overreaction daily screen
+
+# Runs after the ASX close on each weekday (Sydney evening). 08:00 UTC is 6pm
+# AEST / 7pm AEDT, comfortably after the 4pm close and late enough to catch
+# post-close price-sensitive announcements. GitHub cron is UTC and does not
+# follow daylight saving; 08:00 UTC stays after the close year-round.
+on:
+  schedule:
+    - cron: "0 8 * * 1-5"
+  workflow_dispatch: {}   # lets you run it by hand from the Actions tab
+
+permissions:
+  contents: write          # so the job can commit the updated data/ folder
+
+concurrency:
+  group: asx-screen
+  cancel-in-progress: false
+
+jobs:
+  screen:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Self-test (statistical core)
+        run: python -m screener.run --self-test
+
+      - name: Run screen
+        run: python -m screener.run --data-dir data
+
+      - name: Commit results
+        run: |
+          git config user.name  "asx-screen-bot"
+          git config user.email "actions@github.com"
+          git add data
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Daily screen $(date -u +%Y-%m-%d)"
+            git push
+          fi
