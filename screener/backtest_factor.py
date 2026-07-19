@@ -291,12 +291,11 @@ def exit_summary(df):
 
 
 def _fav(s):
-    return bool(re.search(r"information technology|software|semiconductor|technology hardware|"
-                          r"discretionary|industrial|capital goods|automobile", str(s).lower()))
+    return cfg.is_favoured(s)      # single source of truth (config), consistent across markets
 
 
 def _avoid(s):
-    return bool(re.search(r"material|pharma|biotech|telecom|real estate", str(s).lower()))
+    return cfg.is_avoided(s)
 
 
 # ---- insider (SEC Form 4) signal summary — US only ------------------------

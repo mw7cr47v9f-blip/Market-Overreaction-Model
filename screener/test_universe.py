@@ -12,6 +12,21 @@ def ok(name, cond):
     print("  ok ", name)
 
 
+from screener import config as cfg
+print("Favoured-sector matching across the three feeds' naming:")
+ok("S&P 'Information Technology' favoured", cfg.is_favoured("Information Technology"))
+ok("Nasdaq 'Technology' favoured", cfg.is_favoured("Technology"))
+ok("ASX 'Technology Hardware & Equipment' favoured", cfg.is_favoured("Technology Hardware & Equipment"))
+ok("'Consumer Discretionary' favoured", cfg.is_favoured("Consumer Discretionary"))
+ok("'Industrials' favoured", cfg.is_favoured("Industrials"))
+ok("'Health Care' NOT favoured", not cfg.is_favoured("Health Care"))
+ok("'Financials' NOT favoured", not cfg.is_favoured("Financials"))
+ok("biotech NOT favoured (word boundary vs 'bioTECHNOLOGY')",
+   not cfg.is_favoured("Pharmaceuticals, Biotechnology & Life Sciences"))
+ok("biotech IS avoided", cfg.is_avoided("Pharmaceuticals, Biotechnology & Life Sciences"))
+ok("'Materials' avoided", cfg.is_avoided("Materials"))
+ok("'Real Estate' avoided", cfg.is_avoided("Real Estate"))
+
 print("Market-cap parsing:")
 ok("$1.2bn string", datamod._parse_cap("$1,200,000,000") == 1_200_000_000.0)
 ok("plain number", datamod._parse_cap(2_500_000_000) == 2_500_000_000.0)

@@ -25,7 +25,10 @@ HISTORY_CALENDAR_DAYS = 200
 # Backtest verdict: favoured-only book had the best risk-adjusted return (Sharpe
 # ~1.5); the avoid-sectors LOST to the market at equal volatility. See methodology.
 import re as _re
-FAVOURED_SECTORS_RE = (r"information technology|software|semiconductor|technology hardware|"
+# "technology" (bare) covers S&P "Information Technology", ASX "Technology Hardware
+# & Equipment" AND Nasdaq's plain "Technology" label — the three feeds name it
+# differently, so match the common root.
+FAVOURED_SECTORS_RE = (r"\btechnology|software|semiconductor|"
                        r"discretionary|industrial|capital goods|automobile")
 AVOID_SECTORS_RE = r"material|pharma|biotech|telecom|real estate"
 HOLD_MONTHS = 3             # locked time-based exit; no price stop-loss

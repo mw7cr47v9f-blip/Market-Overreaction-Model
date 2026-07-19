@@ -135,16 +135,12 @@ def _sp1500_universe(local_fallback: Optional[str]) -> pd.DataFrame:
 
 # ---- US: Nasdaq-listed names (widens the S&P 1500 with the extra tech/growth
 #          companies that throw off the most overreactions). Nasdaq's own screener
-#          API carries symbol/name/sector/marketCap, so the favoured filter works.
+#          API (api.nasdaq.com) blocks datacenter IPs, so we use a GitHub-hosted
+#          mirror of the same data — reachable from Actions — which carries
+#          symbol / name / sector / marketCap, so the favoured filter works.
 
-_NASDAQ_URL = ("https://api.nasdaq.com/api/screener/stocks"
-               "?tableonly=true&limit=25000&offset=0&exchange=NASDAQ")
-_NASDAQ_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/122.0 Safari/537.36",
-    "Accept": "application/json, text/plain, */*",
-    "Accept-Language": "en-US,en;q=0.9",
-}
+_NASDAQ_URL = ("https://raw.githubusercontent.com/rreichel3/US-Stock-Symbols/"
+               "main/nasdaq/nasdaq_full_tickers.json")
 
 
 def _parse_cap(v) -> Optional[float]:
@@ -160,9 +156,9 @@ def _parse_cap(v) -> Optional[float]:
 def _nasdaq_universe(min_cap: float) -> pd.DataFrame:
     import re
     import requests
-    r = requests.get(_NASDAQ_URL, timeout=60, headers=_NASDAQ_HEADERS)
+    r = requests.get(_NASDAQ_URL, timeout=60, headers={"User-Agent": "Mozilla/5.0"})
     r.raise_for_status()
-    rows = (r.json().get("data") or {}).get("rows") or []
+    rows = r.json() or []
     recs = []
     for row in rows:
         sym = str(row.get("symbol", "")).upper().strip()
@@ -172,10 +168,12 @@ def _nasdaq_universe(min_cap: float) -> pd.DataFrame:
         if min_cap and cap is not None and cap < min_cap:      # bound the pull to the size floor
             continue
         sec = str(row.get("sector") or "").strip()
+        if not sec:                                            # need a sector for the favoured filter
+            continue
         recs.append({"code": sym, "name": str(row.get("name", "")).strip(),
-                     "sector": sec or None, "yahoo": sym.replace(".", "-"), "exchange": "NASDAQ"})
+                     "sector": sec, "yahoo": sym.replace(".", "-"), "exchange": "NASDAQ"})
     df = pd.DataFrame(recs)
-    log(f"Nasdaq screener: {len(df)} common stocks >= size floor")
+    log(f"Nasdaq (GitHub mirror): {len(df)} common stocks >= size floor with sector")
     return df
 
 
