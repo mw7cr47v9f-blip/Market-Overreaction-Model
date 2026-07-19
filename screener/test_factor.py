@@ -59,4 +59,25 @@ ok("baseline 3m stats present", s["baseline_3m"]["n"] == 12 and "hit_rate" in s[
 ok("profitable split present", "yes" in s["by_metric"]["profitable"] and "no" in s["by_metric"]["profitable"])
 ok("roe buckets present", len(s["by_metric"]["roe"]) >= 1)
 
+print("Entry timing (dead-cat filter):")
+from screener.backtest_factor import find_entry
+# after signal at i=5: day6 is a weak up-tick (dead cat), day9 is a real break on volume
+ec = pd.Series([10, 9, 8, 8.2, 7.5, 7.0, 7.1, 6.8, 6.9, 8.0, 8.5])
+ev_ = pd.Series([1000]*11); ev_.iloc[9] = 5000
+ok("naive rule buys the dead-cat pop (day 6)", find_entry(ec, ev_, 5, "up1") == 6)
+ok("confirmed rule waits for the real break (day 9)", find_entry(ec, ev_, 5, "confirmed") == 9)
+falling = pd.Series([10, 9.5, 9, 8.6, 8.3, 8.0, 7.7, 7.5])  # never breaks up
+ok("confirmed rule skips a persistent faller (None)", find_entry(falling, pd.Series([1000]*8), 2, "confirmed", max_wait=5) is None)
+
+print("Exit rules (recover-to-pre-drop):")
+from screener.backtest_factor import exit_rules
+xc = pd.Series([10.0]*8 + [10.0, 8.5, 7.0, 7.5, 8.0, 8.8, 9.5, 10.2] + [10.2]*14)  # pre=10, entry=7, recovers at pos15
+xr = exit_rules(xc, {"pos": 10, "window_len": 2})
+ok("recovered to pre-drop", xr["recovered"] is True)
+ok("days_to_recover == 5", xr["days_to_recover"] == 5)
+ok("target return ~ pre/entry-1 (+42.9%)", abs(xr["r_target"] - (10/7 - 1)) < 0.01)
+never = pd.Series([10.0]*8 + [10.0, 9.0, 7.0] + [7.0]*20)  # entry 7, never gets back to 10
+xr2 = exit_rules(never, {"pos": 10, "window_len": 2})
+ok("never-recover flagged", xr2["recovered"] is False)
+
 print(f"\nALL {passed} FACTOR ASSERTIONS PASSED")

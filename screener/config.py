@@ -13,7 +13,9 @@ from types import SimpleNamespace
 
 Z_THRESHOLD = -2.5           # window return <= this many SD below zero
 INDEX_REL_THRESHOLD = -0.10  # underperform benchmark by >= 10pp
-ABS_DROP_THRESHOLD = -0.10   # raw decline >= 10%
+ABS_DROP_THRESHOLD = -0.15   # raw decline >= 15% (tightened from 10%: backtest showed
+                             # the edge is concentrated in deeper drops — 10-15% falls
+                             # barely beat the market, 15-30% falls win ~65-70%)
 WINDOW_LENGTHS = [1, 2, 3, 4, 5]
 VOL_LOOKBACK = 90            # trailing trading days for the volatility baseline
 MIN_VOL_OBS = 40            # min trailing returns to trust the vol estimate

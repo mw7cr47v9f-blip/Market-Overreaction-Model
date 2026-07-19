@@ -91,9 +91,9 @@ check("no candidate (below size floor)", c is None)
 
 print("Case 6: 3-day cumulative -15% slide (no single big day) -> FLAG on window")
 base = _quiet_series(N, 0.012, seed=6)
-base = _apply_crash(base, -3, -0.055)
-base = _apply_crash(base, -2, -0.055)
-base = _apply_crash(base, -1, -0.055)  # compounding ~ -15.6% over 3 days
+base = _apply_crash(base, -3, -0.065)
+base = _apply_crash(base, -2, -0.065)
+base = _apply_crash(base, -1, -0.065)  # compounding ~ -18% over 3 days (clears 15% floor)
 c = evaluate_series("FFF", "Zeta", base, _big_vol(N), BENCH, CAP, cfg)
 check("candidate returned for multi-day slide", isinstance(c, Candidate))
 check("window length between 3 and 5", 3 <= c.window_len <= 5)

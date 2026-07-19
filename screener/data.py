@@ -71,10 +71,12 @@ def _parse_asx_directory(content: bytes) -> Optional[pd.DataFrame]:
         cols = {c.strip().lower(): c for c in df.columns}
         code_key = next((cols[k] for k in cols if "code" in k or k == "asx code"), None)
         name_key = next((cols[k] for k in cols if "company" in k or k == "name"), None)
+        sec_key = next((cols[k] for k in cols if "gics" in k or "industry" in k or "sector" in k), None)
         if code_key and name_key:
             out = pd.DataFrame({
                 "code": df[code_key].astype(str).str.upper().str.strip(),
                 "name": df[name_key].astype(str).str.strip(),
+                "sector": (df[sec_key].astype(str).str.strip() if sec_key else None),
             })
             out = out[out["code"].str.match(r"^[A-Z0-9]{3,4}$", na=False)]
             out["yahoo"] = out["code"] + ".AX"
@@ -103,10 +105,12 @@ def _sp1500_universe(local_fallback: Optional[str]) -> pd.DataFrame:
                 cols = {str(c).strip().lower(): c for c in t.columns}
                 sc = next((cols[k] for k in cols if k in ("symbol", "ticker symbol", "ticker")), None)
                 nc = next((cols[k] for k in cols if k in ("security", "company", "name")), None)
+                gc = next((cols[k] for k in cols if "gics sector" in k or k == "sector"), None)
                 if sc is not None and len(t) > 50:
                     sub = pd.DataFrame({
                         "code": t[sc].astype(str).str.upper().str.strip(),
                         "name": (t[nc].astype(str).str.strip() if nc is not None else t[sc].astype(str)),
+                        "sector": (t[gc].astype(str).str.strip() if gc is not None else None),
                     })
                     frames.append(sub)
                     log(f"US {url.split('List_of_')[1][:12]}: {len(sub)} names")
