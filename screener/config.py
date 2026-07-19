@@ -63,6 +63,9 @@ MARKETS = {
         "large_cap_cutoff": 20_000_000_000,  # >= US$20bn benchmarks vs S&P 500
         "benchmark_large": "^GSPC",          # S&P 500
         "benchmark_small": "^RUT",           # Russell 2000
+        # LIVE stays S&P 1500 until the Nasdaq widening is validated in the backtest;
+        # the backtest overrides this to "us_expanded" (S&P 1500 + Nasdaq). Flip this
+        # to "us_expanded" once the re-run confirms the added cohort earns its place.
         "universe": "sp1500",
         "announcements": "sec",
     },

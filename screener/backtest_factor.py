@@ -483,6 +483,19 @@ def summarise(df):
             if len(sub) >= 20:
                 out["by_sector"][str(sec)] = {"n": int(len(sub)),
                     "3m": _stat(sub, "fwd_3m", "excess_3m"), "6m": _stat(sub, "fwd_6m", "excess_6m")}
+    # exchange breakdown — does the added Nasdaq cohort behave like the S&P one?
+    if "exchange" in df.columns and df["exchange"].notna().any():
+        out["by_exchange"] = {}
+        fav_mask = df["sector"].map(_fav) if "sector" in df.columns else None
+        for ex, sub in df.groupby("exchange"):
+            if len(sub) >= 20:
+                blk = {"n": int(len(sub)), "3m": _stat(sub, "fwd_3m", "excess_3m"),
+                       "6m": _stat(sub, "fwd_6m", "excess_6m")}
+                if fav_mask is not None:
+                    favsub = sub[sub["sector"].map(_fav)]
+                    if len(favsub) >= 10:
+                        blk["favoured_3m"] = _stat(favsub, "fwd_3m", "excess_3m")
+                out["by_exchange"][str(ex)] = blk
     return out
 
 
@@ -505,6 +518,8 @@ def run(markets, years, data_dir, limit=0):
     period = f"{int(years*365)+260}d"
     for name in markets:
         mcfg = cfg.market_params(name)
+        if name == "US":
+            mcfg.UNIVERSE = "us_expanded"   # backtest tests S&P 1500 + Nasdaq (live stays S&P until validated)
         fb = os.path.join(data_dir, f"universe_{name}.csv")
         uni = datamod.get_universe(mcfg, local_fallback=fb if os.path.exists(fb) else None)
         if limit:
@@ -518,6 +533,7 @@ def run(markets, years, data_dir, limit=0):
             log(f"{name}: no benchmark, skipping"); continue
         name_by = dict(zip(uni["yahoo"], uni["name"])); code_by = dict(zip(uni["yahoo"], uni["code"]))
         sector_by = dict(zip(uni["yahoo"], uni["sector"])) if "sector" in uni.columns else {}
+        exch_by = dict(zip(uni["yahoo"], uni["exchange"])) if "exchange" in uni.columns else {}
         # Stage 1: events per ticker (cheap, price only)
         evmap = {}
         for y, df in prices.items():
@@ -553,6 +569,7 @@ def run(markets, years, data_dir, limit=0):
                 ins = insider_map.get((code_by.get(y, y), ev["date"]), {}) if name == "US" else {}
                 rows.append({"market": name, "ticker": code_by.get(y, y), "name": name_by.get(y, y),
                              "sector": sec or (fund.get("sector") if fund else None),
+                             "exchange": exch_by.get(y),
                              "date": ev["date"], "year": int(ev["date"][:4]),
                              "window_len": ev["window_len"], "raw": ev["raw"],
                              "z": ev["z"], **fm, **et, **xr, **mm, **ins})
@@ -591,8 +608,9 @@ def main():
     ap.add_argument("--self-test", action="store_true")
     a = ap.parse_args()
     if a.self_test:
-        from . import test_factor  # noqa: F401
+        from . import test_factor    # noqa: F401
         from . import test_insiders  # noqa: F401
+        from . import test_universe  # noqa: F401
         return
     markets = [m.strip() for m in a.markets.split(",") if m.strip()] or list(cfg.MARKETS)
     run(markets, a.years, a.data_dir, a.limit)

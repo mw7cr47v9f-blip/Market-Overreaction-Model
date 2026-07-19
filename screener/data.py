@@ -32,6 +32,8 @@ def get_universe(mcfg, local_fallback: Optional[str] = None) -> pd.DataFrame:
         return _asx_universe(local_fallback)
     if kind == "sp1500":
         return _sp1500_universe(local_fallback)
+    if kind == "us_expanded":
+        return _us_expanded_universe(local_fallback)
     raise ValueError(f"Unknown universe source: {kind}")
 
 
@@ -126,7 +128,72 @@ def _sp1500_universe(local_fallback: Optional[str]) -> pd.DataFrame:
     # Yahoo uses '-' where the ticker has a class suffix (BRK.B -> BRK-B)
     out["yahoo"] = out["code"].str.replace(".", "-", regex=False)
     out = out.drop_duplicates("code").reset_index(drop=True)
+    out["exchange"] = "SP1500"
     log(f"US universe (S&P 1500): {len(out)} names")
+    return out
+
+
+# ---- US: Nasdaq-listed names (widens the S&P 1500 with the extra tech/growth
+#          companies that throw off the most overreactions). Nasdaq's own screener
+#          API carries symbol/name/sector/marketCap, so the favoured filter works.
+
+_NASDAQ_URL = ("https://api.nasdaq.com/api/screener/stocks"
+               "?tableonly=true&limit=25000&offset=0&exchange=NASDAQ")
+_NASDAQ_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/122.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+
+def _parse_cap(v) -> Optional[float]:
+    if v is None:
+        return None
+    s = str(v).replace("$", "").replace(",", "").strip()
+    try:
+        return float(s) if s and s not in ("N/A", "--") else None
+    except ValueError:
+        return None
+
+
+def _nasdaq_universe(min_cap: float) -> pd.DataFrame:
+    import re
+    import requests
+    r = requests.get(_NASDAQ_URL, timeout=60, headers=_NASDAQ_HEADERS)
+    r.raise_for_status()
+    rows = (r.json().get("data") or {}).get("rows") or []
+    recs = []
+    for row in rows:
+        sym = str(row.get("symbol", "")).upper().strip()
+        if not re.match(r"^[A-Z][A-Z.]{0,6}$", sym):          # common stock only (no ^, /, units)
+            continue
+        cap = _parse_cap(row.get("marketCap"))
+        if min_cap and cap is not None and cap < min_cap:      # bound the pull to the size floor
+            continue
+        sec = str(row.get("sector") or "").strip()
+        recs.append({"code": sym, "name": str(row.get("name", "")).strip(),
+                     "sector": sec or None, "yahoo": sym.replace(".", "-"), "exchange": "NASDAQ"})
+    df = pd.DataFrame(recs)
+    log(f"Nasdaq screener: {len(df)} common stocks >= size floor")
+    return df
+
+
+def _us_expanded_universe(local_fallback: Optional[str]) -> pd.DataFrame:
+    """S&P 1500 UNION Nasdaq-listed (>= size floor), deduped by ticker. Nasdaq-only
+    names carry exchange='NASDAQ'; the rest 'SP1500'. Best-effort: if Nasdaq fails,
+    falls back to S&P 1500 alone so the run still completes."""
+    sp = _sp1500_universe(local_fallback)
+    try:
+        nq = _nasdaq_universe(cfg.MARKETS["US"]["min_market_cap"])
+    except Exception as e:  # noqa: BLE001
+        log(f"Nasdaq universe failed ({e!r}); using S&P 1500 only")
+        return sp
+    if nq.empty:
+        return sp
+    add = nq[~nq["code"].isin(set(sp["code"]))]
+    out = pd.concat([sp, add], ignore_index=True).drop_duplicates("code").reset_index(drop=True)
+    log(f"US expanded universe: {len(sp)} S&P + {len(add)} Nasdaq-only = {len(out)} names")
     return out
 
 

@@ -94,8 +94,9 @@ def main():
     args = ap.parse_args()
 
     if args.self_test:
-        from . import test_stats   # noqa: F401  (runs assertions on import)
-        from . import test_ledger  # noqa: F401
+        from . import test_stats     # noqa: F401  (runs assertions on import)
+        from . import test_ledger    # noqa: F401
+        from . import test_universe  # noqa: F401
         return
 
     os.makedirs(args.data_dir, exist_ok=True)
