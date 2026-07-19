@@ -83,4 +83,18 @@ sl = pd.Series([10.0]*8 + [10.0, 9.0, 8.0, 7.2] + [7.2]*30)  # entry 8, falls to
 xr3 = exit_rules(sl, {"pos": 10, "window_len": 2})
 ok("8% stop-loss fires on the further drop", abs(xr3["r_sl8"] - (7.2/8 - 1)) < 0.01)
 
+print("Quality factors (npat margin, fcf, growth, cagr):")
+from screener.backtest_factor import _cagr, metrics_for_event
+ok("cagr 10%", _cagr([100, 110, 121]) == 0.1)
+ok("cagr needs >=2 points", _cagr([100]) is None)
+ok("cagr uses real year-gap past a loss year", _cagr([100, -5, 120]) == round((120/100)**0.5 - 1, 4))
+_fund = {"fy": [{"date": pd.Timestamp("2023-06-30"), "ni": 100, "eq": 500, "debt": 100, "rev": 1000, "eps": 1.0, "fcf": 80},
+                {"date": pd.Timestamp("2024-06-30"), "ni": 150, "eq": 600, "debt": 100, "rev": 1200, "eps": 1.5, "fcf": 120}],
+         "shares_out": 100, "sector": "Information Technology", "dividends": None}
+_m = metrics_for_event(_fund, "2025-01-01", 50.0, "US")
+ok("npat_margin = latest ni/rev", _m["npat_margin"] == round(150/1200, 4))
+ok("fcf_margin = latest fcf/rev", _m["fcf_margin"] == round(120/1200, 4))
+ok("rev_growth CAGR", _m["rev_growth"] == round(1200/1000 - 1, 4))
+ok("eps_growth CAGR", _m["eps_growth"] == round(1.5/1.0 - 1, 4))
+
 print(f"\nALL {passed} FACTOR ASSERTIONS PASSED")

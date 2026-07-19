@@ -365,14 +365,28 @@ def ticker_fundamentals(yft):
         return None
     if inc is None or inc.empty:
         return None
+    try:
+        cf = t.cashflow
+    except Exception:  # noqa: BLE001
+        cf = None
 
     def row(df, *names):
+        if df is None:
+            return None
         for nm in names:
             if nm in df.index:
                 return df.loc[nm]
         return None
     ni = row(inc, "Net Income", "Net Income Common Stockholders")
     eq = row(bal, "Stockholders Equity", "Total Stockholders Equity", "Common Stock Equity")
+    rev = row(inc, "Total Revenue", "Operating Revenue")
+    eps = row(inc, "Diluted EPS", "Basic EPS")
+    fcf = row(cf, "Free Cash Flow")
+    if fcf is None:                      # fall back to operating CF - capex
+        ocf = row(cf, "Operating Cash Flow", "Cash Flow From Continuing Operating Activities")
+        capex = row(cf, "Capital Expenditure")
+        if ocf is not None:
+            fcf = ocf + (capex.fillna(0) if capex is not None else 0)  # capex stored negative
     debt = row(bal, "Total Debt")
     if debt is None:
         ld = row(bal, "Long Term Debt"); sd = row(bal, "Current Debt")
@@ -393,16 +407,28 @@ def ticker_fundamentals(yft):
         sector = info.get("sector") or info.get("sectorKey")
     except Exception:  # noqa: BLE001
         pass
+    try:
+        divs = t.dividends              # tz-aware Series indexed by pay date
+    except Exception:  # noqa: BLE001
+        divs = None
+
+    def _g(series, d):
+        try:
+            return float(series.get(d)) if series is not None else np.nan
+        except Exception:  # noqa: BLE001
+            return np.nan
     recs = []
     for d in ni.index:
         try:
-            n_i = float(ni.get(d)); e_q = float(eq.get(d)) if eq is not None else np.nan
-            dv = float(debt.get(d)) if hasattr(debt, "get") else float(debt)
-            recs.append({"date": pd.Timestamp(d), "ni": n_i, "eq": e_q, "debt": dv})
+            recs.append({"date": pd.Timestamp(d), "ni": float(ni.get(d)),
+                         "eq": (float(eq.get(d)) if eq is not None else np.nan),
+                         "debt": (float(debt.get(d)) if hasattr(debt, "get") else float(debt)),
+                         "rev": _g(rev, d), "eps": _g(eps, d), "fcf": _g(fcf, d)})
         except Exception:  # noqa: BLE001
             continue
     return {"fy": sorted(recs, key=lambda r: r["date"]),
-            "shares_out": float(shares_out) if shares_out else None, "sector": sector}
+            "shares_out": float(shares_out) if shares_out else None,
+            "sector": sector, "dividends": divs}
 
 
 def metrics_for_event(fund, entry_date, entry_price, market):
@@ -423,8 +449,46 @@ def metrics_for_event(fund, entry_date, entry_price, market):
         bond = AU_BOND_YIELD if market == "ASX" else metrics_for_event._us_bond.get(entry_date, 0.043)
         m["earnings_yield"] = round(ey, 4)
         m["ey_minus_bond"] = round(ey - bond, 4)
+
+    # ---- the five quality factors under test (all as-of the event, indicative) ----
+    rev, fcf = fy.get("rev"), fy.get("fcf")
+    if rev and rev == rev and rev != 0:
+        m["npat_margin"] = round(ni / rev, 4)                       # profit margin
+        if fcf == fcf and fcf is not None:
+            m["fcf_margin"] = round(fcf / rev, 4)                   # free-cash-flow margin
+    # revenue & EPS growth (CAGR across the prior fiscal years available, ~4y deep on yfinance)
+    m["rev_growth"] = _cagr([r.get("rev") for r in prior])
+    m["eps_growth"] = _cagr([r.get("eps") for r in prior])
+    # trailing-12-month dividend yield as-of entry
+    divs = fund.get("dividends")
+    if divs is not None and entry_price and len(divs):
+        try:
+            idx = divs.index
+            lo = ed.tz_localize(idx.tz) - pd.Timedelta(days=365) if getattr(idx, "tz", None) else ed - pd.Timedelta(days=365)
+            hi = ed.tz_localize(idx.tz) if getattr(idx, "tz", None) else ed
+            ttm = float(divs[(idx > lo) & (idx <= hi)].sum())
+            m["div_yield"] = round(ttm / entry_price, 4)
+        except Exception:  # noqa: BLE001
+            pass
     return m
 metrics_for_event._us_bond = {}
+
+
+def _cagr(vals):
+    """CAGR from first to last POSITIVE value in an ordered fiscal-year list, using
+    the actual year-gap between them (so a loss year in the middle doesn't distort
+    the span). Needs >=2 positive points >=1 year apart; else None."""
+    idx = [i for i, v in enumerate(vals) if v is not None and v == v and v > 0]
+    if len(idx) < 2:
+        return None
+    i0, i1 = idx[0], idx[-1]
+    yrs = i1 - i0
+    if yrs < 1:
+        return None
+    try:
+        return round((vals[i1] / vals[i0]) ** (1.0 / yrs) - 1.0, 4)
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def load_us_bond():
@@ -472,6 +536,16 @@ def summarise(df):
             [-np.inf, 0, .03, .06, np.inf], ["<0", "0-3%", "3-6%", ">6%"])
     out["by_metric"]["momentum_6m"] = buckets("mom", df["momentum_6m"],
         [-np.inf, -.1, 0, .2, np.inf], ["<-10%", "-10-0%", "0-20%", ">20%"])
+    # the five quality factors under test — each bucket reports hit-rate AND mean/excess
+    for fac, edges, labs in (
+        ("npat_margin", [-np.inf, 0, .05, .10, .20, np.inf], ["<0", "0-5%", "5-10%", "10-20%", ">20%"]),
+        ("fcf_margin",  [-np.inf, 0, .05, .15, np.inf],      ["<0", "0-5%", "5-15%", ">15%"]),
+        ("rev_growth",  [-np.inf, 0, .10, .25, np.inf],      ["<0", "0-10%", "10-25%", ">25%"]),
+        ("eps_growth",  [-np.inf, 0, .10, .25, np.inf],      ["<0", "0-10%", "10-25%", ">25%"]),
+        ("div_yield",   [-np.inf, .0001, .02, .04, np.inf],  ["none", "0-2%", "2-4%", ">4%"]),
+    ):
+        if fac in df.columns and df[fac].notna().any():
+            out["by_metric"][fac] = buckets(fac, df[fac], edges, labs)
     # drop-size buckets — the strongest lever
     out["by_metric"]["drop_size"] = buckets("raw", df["raw"],
         [-np.inf, -.30, -.20, -.15, -.10], [">30%", "20-30%", "15-20%", "10-15%"])
@@ -517,8 +591,8 @@ def run(markets, years, data_dir, limit=0):
     period = f"{int(years*365)+260}d"
     for name in markets:
         mcfg = cfg.market_params(name)
-        if name == "US":
-            mcfg.UNIVERSE = "us_expanded"   # backtest tests S&P 1500 + Nasdaq (live stays S&P until validated)
+        # Nasdaq widening was tested and shelved (neutral Sharpe, +40% workload) — backtest
+        # uses S&P 1500 like live. To re-test Nasdaq, set mcfg.UNIVERSE = "us_expanded" here.
         fb = os.path.join(data_dir, f"universe_{name}.csv")
         uni = datamod.get_universe(mcfg, local_fallback=fb if os.path.exists(fb) else None)
         if limit:
