@@ -1,12 +1,16 @@
 name: ASX overreaction daily screen
 
+# Runs after the ASX close on each weekday (Sydney evening). 08:00 UTC is 6pm
+# AEST / 7pm AEDT, comfortably after the 4pm close and late enough to catch
+# post-close price-sensitive announcements. GitHub cron is UTC and does not
+# follow daylight saving; 08:00 UTC stays after the close year-round.
 on:
   schedule:
-    - cron: "30 7 * * 1-5"
-  workflow_dispatch: {}
+    - cron: "0 8 * * 1-5"
+  workflow_dispatch: {}   # lets you run it by hand from the Actions tab
 
 permissions:
-  contents: write
+  contents: write          # so the job can commit the updated data/ folder
 
 concurrency:
   group: asx-screen

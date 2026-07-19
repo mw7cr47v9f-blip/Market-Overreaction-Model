@@ -1,5 +1,8 @@
 name: Factor backtest (manual)
 
+# Manual, on-demand. Generates oversold events over N years, attaches the five
+# candidate metrics, measures 3m/6m forward returns, and writes a bucketed
+# summary. INDICATIVE (free data) — see backtest_factor.py caveats.
 on:
   workflow_dispatch:
     inputs:
@@ -32,6 +35,8 @@ jobs:
       - name: Self-test (factor logic)
         run: python -m screener.backtest_factor --self-test
       - name: Run backtest
+        env:
+          SEC_USER_AGENT: "Market-Overreaction-Backtest research keegancrage@icloud.com"
         run: python -m screener.backtest_factor --years "${{ inputs.years }}" --markets "${{ inputs.markets }}" --data-dir data
       - name: Commit results
         run: |
