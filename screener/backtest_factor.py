@@ -154,9 +154,12 @@ def entry_timing_fields(close, volume, bench, ev):
             out[f"{rule}_conf"] = False
         else:
             f6, e6 = _fwd(close, bench, ep, H6)
+            f3, e3 = _fwd(close, bench, ep, H3)
             out[f"{rule}_conf"] = True
             out[f"{rule}_fwd6m"] = f6
             out[f"{rule}_exc6m"] = e6
+            out[f"{rule}_fwd3m"] = f3          # confirmed-entry 3-month hold (the exact stack)
+            out[f"{rule}_exc3m"] = e3
             out[f"{rule}_days"] = ep - i
     return out
 
@@ -178,8 +181,11 @@ def entry_summary(df):
             "median_days_to_entry": (round(float(df.loc[df[cflag] == True, f"{rule}_days"].median()), 1)
                                      if (df[cflag] == True).any() and f"{rule}_days" in df else None),  # noqa: E712
             "entry_6m": _stat(conf, f"{rule}_fwd6m", f"{rule}_exc6m"),
+            "entry_3m": _stat(conf, f"{rule}_fwd3m", f"{rule}_exc3m") if f"{rule}_fwd3m" in df else {"n": 0},
             "baseline_same_events_6m": _stat(conf, "fwd_6m", "excess_6m"),
+            "baseline_same_events_3m": _stat(conf, "fwd_3m", "excess_3m"),
             "skipped_events_baseline_6m": _stat(skipped, "fwd_6m", "excess_6m"),
+            "skipped_events_baseline_3m": _stat(skipped, "fwd_3m", "excess_3m"),
         }
     return out
 
@@ -189,7 +195,11 @@ def entry_summary(df):
 EXIT_MAX = 126        # max window for a winner to ride via the trailing stop
 RECOVER_TIMESTOP = 63  # cut a name that hasn't recovered to pre-drop by ~3 months
 TRAIL = 0.08          # trailing stop once the pre-drop target is hit
-STOPS = (5, 8, 10, 12)  # hard stop-loss levels to test (% below entry), fixed-3m base
+STOPS = (5, 8, 10, 12, 25, 30)  # hard stop-loss levels (% below entry), fixed-3m base.
+                                # 25/30 = WIDE 'catastrophe' stops: they should not fire on
+                                # normal mean-reversion noise (tight 5-12% ones do, and hurt),
+                                # but cap the true blow-up / delisting tail — the survivorship
+                                # insurance without killing the return.
 
 
 def exit_rules(close, ev):
