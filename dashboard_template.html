@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cragent.ai — Daily Dashboard</title>
+<style>
+  :root{
+    --ink:#0E1B2A; --slate:#38485A; --mut:#6B7A8D; --line:#E2E8F0; --card:#fff;
+    --teal:#0E8F86; --teal-d:#0B6E67; --amber:#B9791A; --red:#B4472F; --green:#1F9D57;
+    --bg:#F4F7FA; --band:#EAF4F3;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);
+       color:var(--slate);font-size:14px;line-height:1.55;padding:26px 18px 60px;}
+  .wrap{max-width:900px;margin:0 auto;}
+  .wm{font-family:Georgia,"Times New Roman",serif;font-weight:700;}
+  header{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2.5px solid var(--ink);padding-bottom:12px;}
+  .brand{font-size:30px;color:var(--ink);} .brand .ai{color:var(--teal);} .brand .dot{color:var(--amber);}
+  .sub{color:var(--mut);font-size:13px;margin-top:3px;}
+  .scan{text-align:right;color:var(--mut);font-size:12px;} .scan b{color:var(--ink);font-size:16px;display:block;}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:1.3px;color:var(--teal-d);margin:26px 0 10px;}
+  .tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:18px;}
+  .tile{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:14px 15px;box-shadow:0 1px 2px rgba(14,27,42,.04);}
+  .tile.l{border-left:3px solid var(--teal);}
+  .tile .k{font-size:11px;color:var(--mut);}
+  .tile .v{font-size:26px;font-weight:700;color:var(--ink);line-height:1.1;margin-top:3px;}
+  .tile .s{font-size:11px;color:var(--mut);margin-top:2px;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:18px 20px;margin-bottom:14px;box-shadow:0 1px 2px rgba(14,27,42,.04);}
+  .chead{display:flex;align-items:center;gap:11px;}
+  .tk{font-family:Georgia,serif;font-weight:700;background:var(--ink);color:#fff;border-radius:8px;padding:5px 9px;font-size:14px;letter-spacing:.5px;}
+  .mk{font-size:10px;font-weight:700;color:var(--teal-d);background:var(--band);border:1px solid #CDE8E5;border-radius:5px;padding:2px 6px;}
+  .cn{font-weight:700;color:var(--ink);font-size:15px;} .cs{color:var(--mut);font-size:12px;}
+  .badge{margin-left:auto;font-size:11px;font-weight:600;padding:4px 11px;border-radius:20px;}
+  .b-judge{background:#FBF0E6;color:var(--amber);} .b-over{background:#EAF4F3;color:var(--teal-d);}
+  .b-fail{background:#EFF2F6;color:var(--mut);} .b-just{background:#FBEAE6;color:var(--red);}
+  .metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:2px 16px;margin:14px 0 6px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:11px 0;}
+  .metrics .k{font-size:11px;color:var(--mut);} .metrics .v{font-size:16px;font-weight:700;color:var(--ink);}
+  .metrics .v.neg{color:var(--red);}
+  .read{margin:12px 0 6px;color:var(--slate);}
+  .lab{font-size:11px;text-transform:uppercase;letter-spacing:.7px;color:var(--mut);margin:12px 0 4px;font-weight:700;}
+  .pill{display:inline-block;font-size:11px;background:#EEF2F7;color:var(--slate);border-radius:5px;padding:2px 8px;margin-left:6px;}
+  .gate{display:flex;flex-wrap:wrap;gap:7px;margin-top:5px;}
+  .gitem{font-size:12px;border:1px solid var(--line);border-radius:20px;padding:4px 11px;display:flex;align-items:center;gap:6px;}
+  .dot-ok{width:14px;height:14px;border-radius:50%;background:var(--green);color:#fff;font-size:9px;display:inline-flex;align-items:center;justify-content:center;font-weight:700;}
+  .dot-no{width:14px;height:14px;border-radius:50%;background:var(--red);color:#fff;font-size:9px;display:inline-flex;align-items:center;justify-content:center;font-weight:700;}
+  a{color:var(--teal-d);text-decoration:none;border-bottom:1px solid #BFE0DC;}
+  table{width:100%;border-collapse:collapse;font-size:13px;margin-top:4px;}
+  th,td{padding:9px 10px;text-align:right;border-bottom:1px solid var(--line);}
+  th:first-child,td:first-child{text-align:left;}
+  thead th{background:var(--ink);color:#fff;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px;border:none;}
+  tbody tr:nth-child(even){background:#F8FAFC;}
+  .pos{color:var(--green);font-weight:600;} .negv{color:var(--red);font-weight:600;}
+  .due{background:#FBF0E6 !important;} .soon{background:#FFF8EC !important;}
+  .flag{font-size:10px;font-weight:700;padding:2px 7px;border-radius:12px;}
+  .flag.SELL_DUE{background:#F6D9CF;color:var(--red);} .flag.SELL_SOON{background:#F6E7C8;color:var(--amber);} .flag.OPEN{background:var(--band);color:var(--teal-d);}
+  .note{background:var(--card);border:1px solid var(--line);border-left:3px solid var(--teal);border-radius:0 8px 8px 0;padding:11px 14px;font-size:12.5px;color:var(--mut);margin-top:8px;}
+  .empty{color:var(--mut);font-size:13px;padding:10px 2px;}
+  footer{margin-top:26px;padding-top:12px;border-top:1px solid var(--line);font-size:10.5px;color:var(--mut);text-align:justify;line-height:1.5;}
+  @media print{
+    @page{size:A4;margin:11mm;}
+    body{background:#fff;padding:0;font-size:11.5px;}
+    .wrap{max-width:100%;}
+    .tile,.card,.note{box-shadow:none;}
+    .card,table,.note{page-break-inside:avoid;}
+    h2{margin-top:16px;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<script>
+/* ============================================================================
+   DATA — the daily task rewrites THIS object each evening from candidates_new.json,
+   its primary-source analysis, and ledger_status.json. Everything below renders
+   from it. (Values shown are the 17 Jul 2026 run + the seeded model book.)
+   ============================================================================ */
+/* DATA_START — the daily task replaces everything between these markers */
+const DATA = {
+  scan_date: "17 July 2026",
+  summary: {
+    flagged: {v:2, s:"favoured sectors, ≥15%"},
+    cleared: {v:2, s:"IBM, PNR"},
+    extreme: {v:"−26.7%", s:"IBM · 4.30σ"},
+    open: {v:2, s:"model book"},
+    sells_due: {v:0, s:"none today"},
+    win_rate: {v:"—", s:"no closes yet"}
+  },
+  candidates: [
+    { tk:"IBM", mk:"US", name:"IBM", sector:"Information Technology", status:"judge",
+      drop:"−26.7%", idx:"−26.0pp", z:"−4.30", window:"4 days · 13–17 Jul",
+      cap:"$200bn", liq:"$2.28bn/day",
+      read:"The clean quarterly math screams overreaction (cap loss ~7–9× the implied earnings hit), but the market is repricing a structural growth concern (software stalling, guidance pulled). A re-check-after-22-Jul case, not a verdict.",
+      trigger:"(B) Judgement required",
+      detail:"Preliminary Q2 warning (14 Jul, 8 days early): revenue $17.2bn vs ~$17.86bn expected (~$660m miss); adj EPS $2.93 vs $3.02; software growth decelerated to ~5% (~0.4% organic); full-year guidance withheld.",
+      implied:"~$66bn wiped off vs a quarterly miss whose mechanical impact is only single-digit billions (~$7–10bn). That gap is only explained if the market is re-rating IBM's growth and multiple — the decisive detail lands with the full Q2 report on 22 Jul.",
+      sources:[["IBM preliminary Q2 8-K (SEC EDGAR)","#"],["IBM FY2025 10-K","#"]],
+      insider:"No director purchases in the prior 6 months (Form 4).",
+      gate:[["NPAT (FY25)","+$10.6bn",1],["ROE","~32%",1],["Going concern","none",1],["Trading halt","no",1]] },
+    { tk:"PNR", mk:"US", name:"Pentair", sector:"Industrials", status:"judge",
+      drop:"−17.5%", idx:"−17.4pp", z:"−5.11", window:"3 days · 14–17 Jul",
+      cap:"$10.1bn", liq:"$171m/day",
+      read:"Two shocks at once — the CFO resigned days before a preliminary Q2 print. A CFO exit landing on earnings is a governance flag, not a clean number; the kind of ambiguity the model is built to sort. A watch pending the detail.",
+      trigger:"(B) Judgement required",
+      detail:"8-K (14 Jul): CFO Nicholas Brazis resigned 10 Jul; interim CFO appointed; references preliminary Q2-2026 earnings (Exhibit 99.1).",
+      implied:"Numbers sit in the earnings exhibit; the market has priced the governance uncertainty ahead of the detail. Re-check on the full Q2 release and any 8-K/A follow-up.",
+      sources:[["Pentair 8-K (SEC EDGAR)","#"],["Pentair IR"]],
+      insider:"No director purchases in the prior 6 months (Form 4).",
+      gate:[["NPAT (FY25)","positive",1],["ROE","≥5%",1],["Going concern","none",1],["Trading halt","no",1]] }
+  ],
+  excluded: "Also fell ≥15% but excluded by the model: A1M (AIC Mines) −25.8% — Materials, an avoid-sector. Seven other names fell <15%.",
+  ledger: {
+    open: [
+      {tk:"IBM", mk:"US", sector:"Information Technology", entry_date:"14 Jul 2026", entry:212.67, last:212.67, ret:0.0, held:5, due:"14 Oct 2026", flag:"OPEN"},
+      {tk:"PNR", mk:"US", sector:"Industrials", entry_date:"15 Jul 2026", entry:62.45, last:62.45, ret:0.0, held:4, due:"15 Oct 2026", flag:"OPEN"}
+    ],
+    sells_due: [],
+    tally: {n_closed:0, win_rate:"—", avg:"—"},
+    holdings: []   // populated from your holdings.csv
+  }
+};
+/* DATA_END */
+
+/* ---- render ---------------------------------------------------------------*/
+const $ = h => { const d=document.createElement('div'); d.innerHTML=h; return d.firstElementChild; };
+const money = (mk,v) => (mk==="US"?"$":"A$") + Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+const retc = v => v===null||v==="—" ? '<span class="mut">—</span>' : `<span class="${v>=0?'pos':'negv'}">${v>=0?'+':''}${(v*100).toFixed(1)}%</span>`;
+const badge = s => ({judge:['b-judge','Judgement required'],over:['b-over','Overreaction plausible'],fail:['b-fail','Quality-gate failed'],just:['b-just','Move looks justified']}[s]||['b-over',s]);
+
+function render(){
+  const A=document.getElementById('app'); const d=DATA;
+  A.appendChild($(`<header><div><div class="wm brand">Cragent<span class="dot">.</span><span class="ai">ai</span></div>
+     <div class="sub">Daily overreaction screen &amp; ledger — ASX &amp; US</div></div>
+     <div class="scan">Scan date<b>${d.scan_date}</b></div></header>`));
+
+  // tiles
+  const t=d.summary; const tiles=$(`<div class="tiles"></div>`);
+  const tile=(cls,k,v,s)=>`<div class="tile ${cls}"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${s}</div></div>`;
+  tiles.innerHTML =
+     tile('','New candidates',t.flagged.v,t.flagged.s)+tile('','Cleared gate',t.cleared.v,t.cleared.s)+
+     tile('','Most extreme',t.extreme.v,t.extreme.s)+tile('l','Open positions',t.open.v,t.open.s)+
+     tile('l','Sells due',t.sells_due.v,t.sells_due.s)+tile('l','Realised win-rate',t.win_rate.v,t.win_rate.s);
+  tiles.style.gridTemplateColumns='repeat(3,1fr)';
+  A.appendChild(tiles);
+
+  // candidates
+  A.appendChild($(`<h2>Candidates — ${d.scan_date}</h2>`));
+  d.candidates.forEach(c=>{
+    const [bc,bt]=badge(c.status);
+    const gate=c.gate.map(g=>`<div class="gitem"><span class="${g[2]?'dot-ok':'dot-no'}">${g[2]?'✓':'✕'}</span>${g[0]} · <b>${g[1]}</b></div>`).join('');
+    const src=c.sources.map(s=>s[1]?`<a href="${s[1]}">${s[0]}</a>`:s[0]).join(' · ');
+    A.appendChild($(`<div class="card">
+      <div class="chead"><span class="tk">${c.tk}</span><span class="mk">${c.mk}</span>
+        <div><div class="cn">${c.name}</div><div class="cs">${c.sector}</div></div>
+        <span class="badge ${bc}">${bt}</span></div>
+      <div class="metrics">
+        <div><div class="k">Drop (raw)</div><div class="v neg">${c.drop}</div></div>
+        <div><div class="k">vs index</div><div class="v neg">${c.idx}</div></div>
+        <div><div class="k">z-score</div><div class="v">${c.z}</div></div>
+        <div><div class="k">Window</div><div class="v" style="font-size:13px">${c.window}</div></div>
+        <div><div class="k">Market cap</div><div class="v" style="font-size:13px">${c.cap}</div></div>
+        <div><div class="k">Liquidity</div><div class="v" style="font-size:13px">${c.liq}</div></div>
+      </div>
+      <div class="read">${c.read}</div>
+      <div class="lab">Trigger <span class="pill">${c.trigger}</span></div>
+      <div style="font-size:13px">${c.detail}</div>
+      <div class="lab">Implied vs actual</div><div style="font-size:13px">${c.implied}</div>
+      <div class="lab">Director / insider</div><div style="font-size:13px">${c.insider}</div>
+      <div class="lab">Quality gate</div><div class="gate">${gate}</div>
+      <div style="margin-top:10px;font-size:12px;color:var(--mut)">Primary sources: ${src}</div>
+    </div>`));
+  });
+  if(d.excluded) A.appendChild($(`<div class="note">${d.excluded}</div>`));
+
+  // ledger
+  A.appendChild($(`<h2>Buy / sell ledger</h2>`));
+  const L=d.ledger;
+  if(L.sells_due.length){
+    A.appendChild($(`<div class="lab" style="color:var(--red)">Sells due now</div>`));
+    A.appendChild(posTable(L.sells_due,true));
+  }
+  A.appendChild($(`<div class="lab">Model book — open positions (${L.open.length})</div>`));
+  A.appendChild(L.open.length?posTable(L.open,false):$(`<div class="empty">No open model positions.</div>`));
+  A.appendChild($(`<div class="note">Model positions are entered at the signal close and held a fixed 3 months; each auto-closes at its sell-due date and rolls into the realised tally below. Last close updates on each weekday screen run. <b>Realised so far:</b> ${L.tally.n_closed} closed · win-rate ${L.tally.win_rate} · avg ${L.tally.avg}.</div>`));
+
+  A.appendChild($(`<div class="lab">Your holdings</div>`));
+  if(L.holdings.length){ A.appendChild(posTable(L.holdings,false)); }
+  else { A.appendChild($(`<div class="empty">No personal holdings recorded. Add rows to <b>holdings.csv</b> (ticker, market, entry_date, entry_price, quantity, notes) and they'll appear here, marked to market with a 3-month sell prompt.</div>`)); }
+
+  A.appendChild($(`<footer><b>Disclaimer.</b> Cragent.ai is an automated stock screen for general information, educational and entertainment purposes only. It is NOT financial product advice, investment advice, or a recommendation, offer or solicitation to buy, sell or hold any security, and does not consider your objectives, financial situation or needs. Nothing in it should be relied upon or acted upon in any way. Figures may be inaccurate, incomplete or out of date; past performance and backtested results are not a guide to future performance. Obtain your own independent professional financial advice before any investment decision. To the maximum extent permitted by law, the author excludes all liability for any loss or damage arising from any use of, or reliance on, this material.</footer>`));
+}
+
+function posTable(rows,dueStyle){
+  const head=`<thead><tr><th>Ticker</th><th>Sector</th><th>Entry date</th><th>Entry</th><th>Last close</th><th>Return</th><th>Held</th><th>Sell due</th><th></th></tr></thead>`;
+  const body=rows.map(r=>{
+    const cls = r.flag==="SELL_DUE"?"due":(r.flag==="SELL_SOON"?"soon":"");
+    return `<tr class="${cls}"><td><b>${r.tk}</b> <span style="color:#9aa7b5">[${r.mk}]</span></td><td>${r.sector||''}</td>
+      <td>${r.entry_date||'—'}</td><td>${r.entry!=null?money(r.mk,r.entry):'—'}</td>
+      <td>${r.last!=null?money(r.mk,r.last):'—'}</td><td>${retc(r.ret)}</td>
+      <td>${r.held!=null?r.held+' d':'—'}</td><td>${r.due||'—'}</td>
+      <td><span class="flag ${r.flag}">${(r.flag||'').replace('_',' ')}</span></td></tr>`;
+  }).join('');
+  return $(`<table>${head}<tbody>${body}</tbody></table>`);
+}
+render();
+</script>
+</body>
+</html>
