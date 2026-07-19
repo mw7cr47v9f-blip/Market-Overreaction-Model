@@ -34,7 +34,9 @@ jobs:
         run: python -m screener.run --self-test
 
       - name: Run screen
-        run: python -m screener.run --data-dir data
+        # US S&P 1500 only — the backtest showed the ASX overreaction edge is weak
+        # outside 2020 (sub-50% hit, ~0% excess), so the live model is US-focused.
+        run: python -m screener.run --data-dir data --markets US
 
       - name: Commit results
         run: |
