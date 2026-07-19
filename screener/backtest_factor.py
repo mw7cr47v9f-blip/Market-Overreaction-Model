@@ -523,7 +523,7 @@ def run(markets, years, data_dir, limit=0):
                 tk = code_by.get(y, y)
                 ev_by_tk.setdefault(tk, []).extend(e["date"] for e in evs)
             try:
-                insider_map = us_insiders.insider_signals_for_events(ev_by_tk)
+                insider_map = us_insiders.insider_signals_for_events(ev_by_tk, years=years)
             except Exception as e:  # noqa: BLE001
                 log(f"insider signal fetch failed: {e!r}")
         # Stage 2: fundamentals only for names with events
