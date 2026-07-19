@@ -19,12 +19,13 @@ Offline logic check:    python -m screener.backtest_factor --self-test
 """
 from __future__ import annotations
 
-import argparse, json, math, os, sys
+import argparse, json, math, os, re, sys
 import numpy as np
 import pandas as pd
 
 from . import config as cfg
 from . import data as datamod
+from . import us_insiders
 
 H3, H6 = 63, 126           # ~3 and ~6 trading months
 COOLDOWN = 21              # trading days between distinct events for one name
@@ -185,68 +186,87 @@ def entry_summary(df):
 
 # ---- exit rules: fixed hold vs recover-to-pre-drop-price vs +trailing ------
 
-EXIT_MAX = 126        # max holding window (trading days) for path simulation
+EXIT_MAX = 126        # max window for a winner to ride via the trailing stop
+RECOVER_TIMESTOP = 63  # cut a name that hasn't recovered to pre-drop by ~3 months
 TRAIL = 0.08          # trailing stop once the pre-drop target is hit
+STOPS = (5, 8, 10, 12)  # hard stop-loss levels to test (% below entry), fixed-3m base
 
 
 def exit_rules(close, ev):
     """Path-dependent exits, entering at the signal-day close (position i).
-    Reference 'pre-drop price' = the close just BEFORE the drop window."""
+    Reference 'pre-drop price' = the close just BEFORE the drop window.
+    Non-recoverers are cut at a 3-month time-stop; winners ride a trailing stop.
+    Also simulates a fixed-3-month hold with a hard stop-loss at several levels."""
     close = close.dropna().sort_index()
     i, w, n = ev["pos"], ev["window_len"], len(close)
     if i - w < 0 or i + 1 >= n:
         return {}
     entry = float(close.iloc[i])
-    pre = float(close.iloc[i - w])                     # price before the overreaction
-    end = min(i + EXIT_MAX, n - 1)
-    path = close.iloc[i + 1:end + 1]
-    if len(path) == 0 or entry <= 0:
+    pre = float(close.iloc[i - w])
+    if entry <= 0:
         return {}
+    end = min(i + EXIT_MAX, n - 1)
     out = {"pre_drop_target_ret": round(pre / entry - 1, 4),
-           "mfe": round(float(path.max()) / entry - 1, 4)}
-    # first day it recovers to the pre-drop price
+           "mfe": round(float(close.iloc[i + 1:end + 1].max()) / entry - 1, 4)}
+
+    # recover to pre-drop within the 3-month time-stop window
+    rec_end = min(i + RECOVER_TIMESTOP, n - 1)
     hit = None
-    for k in range(len(path)):
-        if float(path.iloc[k]) >= pre:
-            hit = k + 1
+    for j in range(i + 1, rec_end + 1):
+        if float(close.iloc[j]) >= pre:
+            hit = j
             break
     out["recovered"] = hit is not None
     if hit is not None:
-        out["days_to_recover"] = hit
-        out["r_target"] = round(pre / entry - 1, 4)     # sell flat at target
-        out["hold_target"] = hit
-        # target + trailing stop: from the recovery day, ride until it drops TRAIL off its peak
-        seg = close.iloc[i + hit:end + 1]
+        out["days_to_recover"] = hit - i
+        out["r_target"] = round(pre / entry - 1, 4)
+        out["hold_target"] = hit - i
+        seg = close.iloc[hit:end + 1]                  # ride the winner from recovery day
         peak = float(seg.iloc[0]); exitp = float(seg.iloc[-1]); hold = len(seg) - 1
         for k in range(1, len(seg)):
             c = float(seg.iloc[k]); peak = max(peak, c)
             if c < peak * (1 - TRAIL):
                 exitp = c; hold = k; break
         out["r_trail"] = round(exitp / entry - 1, 4)
-        out["hold_trail"] = hit + hold
-    else:                                               # never recovered -> time-stop at window end
-        out["r_target"] = round(float(path.iloc[-1]) / entry - 1, 4)
-        out["hold_target"] = len(path)
-        out["r_trail"] = out["r_target"]
-        out["hold_trail"] = len(path)
+        out["hold_trail"] = (hit - i) + hold
+    else:                                              # 3-month time-stop
+        tp = min(i + RECOVER_TIMESTOP, n - 1)
+        out["r_target"] = round(float(close.iloc[tp]) / entry - 1, 4)
+        out["hold_target"] = tp - i
+        out["r_trail"] = out["r_target"]; out["hold_trail"] = tp - i
+
+    # fixed-3-month hold WITH a hard stop-loss at each level
+    h3 = min(i + 63, n - 1)
+    for stop in STOPS:
+        lvl = entry * (1 - stop / 100.0)
+        ex, exd = None, None
+        for j in range(i + 1, h3 + 1):
+            if float(close.iloc[j]) <= lvl:
+                ex, exd = float(close.iloc[j]), j - i
+                break
+        if ex is None:
+            ex, exd = float(close.iloc[h3]), h3 - i
+        out[f"r_sl{stop}"] = round(ex / entry - 1, 4)
+        out[f"hold_sl{stop}"] = exd
     return out
 
 
 def exit_summary(df):
     def ann(mean, hold):
         return round((1 + mean) ** (252.0 / hold) - 1, 4) if hold and mean > -1 else None
-    def block(ret, hold_days_series_or_const, extra=None):
+
+    def block(ret, hold, extra=None):
         r = ret.dropna()
         if len(r) == 0:
             return {"n": 0}
-        hold = (float(hold_days_series_or_const.mean()) if hasattr(hold_days_series_or_const, "mean")
-                else float(hold_days_series_or_const))
+        h = float(hold.mean()) if hasattr(hold, "mean") else float(hold)
         d = {"n": int(len(r)), "mean": round(float(r.mean()), 4), "median": round(float(r.median()), 4),
-             "hit": round(float((r > 0).mean()), 3), "avg_hold_days": round(hold, 1),
-             "annualised": ann(float(r.mean()), hold)}
+             "hit": round(float((r > 0).mean()), 3), "avg_hold_days": round(h, 1),
+             "annualised": ann(float(r.mean()), h)}
         if extra:
             d.update(extra)
         return d
+
     out = {"fixed_3m": block(df["fwd_3m"], 63), "fixed_6m": block(df["fwd_6m"], 126)}
     if "r_target" in df.columns:
         rec = round(float(df["recovered"].mean()), 3) if "recovered" in df else None
@@ -254,6 +274,72 @@ def exit_summary(df):
         out["target_plus_trail"] = block(df["r_trail"], df["hold_trail"], {"recover_rate": rec})
         out["median_days_to_recover"] = (round(float(df.loc[df["recovered"] == True, "days_to_recover"].median()), 1)  # noqa: E712
                                          if "days_to_recover" in df and (df.get("recovered") == True).any() else None)  # noqa: E712
+    for stop in STOPS:
+        if f"r_sl{stop}" in df.columns:
+            out[f"fixed3m_stop{stop}"] = block(df[f"r_sl{stop}"], df[f"hold_sl{stop}"])
+    return out
+
+
+def _fav(s):
+    return bool(re.search(r"information technology|software|semiconductor|technology hardware|"
+                          r"discretionary|industrial|capital goods|automobile", str(s).lower()))
+
+
+def _avoid(s):
+    return bool(re.search(r"material|pharma|biotech|telecom|real estate", str(s).lower()))
+
+
+# ---- insider (SEC Form 4) signal summary — US only ------------------------
+
+def insider_summary(df):
+    """Do prior director/insider trades sort forward returns among oversold names?
+    Buckets by the coarse buy/sell/none signal and by the director-buy flag (the
+    live 'double the position' trigger), and estimates the effect of doubling the
+    weight on director-buy events versus equal-weighting everything."""
+    if "insider_signal" not in df.columns:
+        return {"note": "no insider data in this run"}
+    d = df[df["insider_signal"].notna()]
+    if len(d) == 0:
+        return {"note": "no insider signal captured"}
+    out = {"n_with_signal": int(len(d))}
+    out["by_signal"] = {}
+    for lab in ("buy", "sell", "none", "mixed"):
+        sub = d[d["insider_signal"] == lab]
+        if len(sub) >= 5:
+            out["by_signal"][lab] = {"n": int(len(sub)),
+                "3m": _stat(sub, "fwd_3m", "excess_3m"), "6m": _stat(sub, "fwd_6m", "excess_6m")}
+    for flag_col in ("director_buy", "director_sell"):
+        if flag_col in d.columns:
+            blk = {}
+            for lab, val in (("yes", True), ("no", False)):
+                sub = d[d[flag_col] == val]
+                if len(sub) >= 5:
+                    blk[lab] = {"n": int(len(sub)),
+                        "3m": _stat(sub, "fwd_3m", "excess_3m"), "6m": _stat(sub, "fwd_6m", "excess_6m")}
+            out[flag_col] = blk
+    # doubling-up: 2x weight on director-buy events vs equal weight
+    for tag in ("3m", "6m"):
+        col = f"fwd_{tag}"
+        sub = d[d[col].notna()]
+        if len(sub) >= 10 and "director_buy" in sub.columns:
+            w = sub["director_buy"].map(lambda b: 2.0 if b else 1.0)
+            out[f"double_on_director_buy_{tag}"] = {
+                "equal_weight": round(float(sub[col].mean()), 4),
+                "double_dirbuy": round(float((sub[col] * w).sum() / w.sum()), 4),
+                "n_dirbuy": int((sub["director_buy"] == True).sum())}  # noqa: E712
+    return out
+
+
+def by_year_summary(df):
+    """Forward-return distribution by the event's calendar year (needs >=10/yr).
+    Lets us report per-year and 5-year-average returns once the run completes."""
+    if "year" not in df.columns:
+        return {}
+    out = {}
+    for yr, sub in df.groupby("year"):
+        if len(sub) >= 10:
+            out[str(int(yr))] = {"n": int(len(sub)),
+                "3m": _stat(sub, "fwd_3m", "excess_3m"), "6m": _stat(sub, "fwd_6m", "excess_6m")}
     return out
 
 
@@ -429,6 +515,17 @@ def run(markets, years, data_dir, limit=0):
             if evs:
                 evmap[y] = evs
         log(f"{name}: {sum(len(v) for v in evmap.values())} events across {len(evmap)} names")
+        # Insider (SEC Form 4) signal — US only, fetched once per event-ticker.
+        insider_map = {}
+        if name == "US" and evmap:
+            ev_by_tk = {}
+            for y, evs in evmap.items():
+                tk = code_by.get(y, y)
+                ev_by_tk.setdefault(tk, []).extend(e["date"] for e in evs)
+            try:
+                insider_map = us_insiders.insider_signals_for_events(ev_by_tk)
+            except Exception as e:  # noqa: BLE001
+                log(f"insider signal fetch failed: {e!r}")
         # Stage 2: fundamentals only for names with events
         for y, evs in evmap.items():
             fund = None
@@ -443,10 +540,12 @@ def run(markets, years, data_dir, limit=0):
                 et = entry_timing_fields(df["Close"], df["Volume"], bench, ev)
                 xr = exit_rules(df["Close"], ev)
                 mm = metrics_for_event(fund, ev["date"], ev["entry"], name) if fund else {}
+                ins = insider_map.get((code_by.get(y, y), ev["date"]), {}) if name == "US" else {}
                 rows.append({"market": name, "ticker": code_by.get(y, y), "name": name_by.get(y, y),
                              "sector": sec or (fund.get("sector") if fund else None),
-                             "date": ev["date"], "window_len": ev["window_len"], "raw": ev["raw"],
-                             "z": ev["z"], **fm, **et, **xr, **mm})
+                             "date": ev["date"], "year": int(ev["date"][:4]),
+                             "window_len": ev["window_len"], "raw": ev["raw"],
+                             "z": ev["z"], **fm, **et, **xr, **mm, **ins})
     df = pd.DataFrame(rows)
     os.makedirs(data_dir, exist_ok=True)
     df.to_csv(os.path.join(data_dir, "backtest_events.csv"), index=False)
@@ -454,9 +553,19 @@ def run(markets, years, data_dir, limit=0):
     if len(df):
         summary["entry_timing"] = entry_summary(df)
         summary["exit_rules"] = exit_summary(df)
+        summary["by_year"] = by_year_summary(df)
+        summary["insider"] = insider_summary(df)
+        if "sector" in df.columns and df["sector"].notna().any():
+            summary["exit_rules_excl_avoided"] = exit_summary(df[~df["sector"].map(_avoid)])
+            summary["exit_rules_favoured"] = exit_summary(df[df["sector"].map(_fav)])
+            fav = df[df["sector"].map(_fav)]
+            if "insider_signal" in fav.columns and fav["insider_signal"].notna().any():
+                summary["insider_favoured"] = insider_summary(fav)
     summary["caveats"] = ["Universe = today's membership; delisted excluded (survivorship bias).",
                           "Fundamentals: yfinance, survivor-only & as-restated, ~4y deep — INDICATIVE, not point-in-time.",
-                          "AU 10y bond yield is a fixed proxy (%.1f%%)." % (AU_BOND_YIELD*100)]
+                          "AU 10y bond yield is a fixed proxy (%.1f%%)." % (AU_BOND_YIELD*100),
+                          "Insider signal = SEC Form 4 (US only, point-in-time by filing date). "
+                          "ASX Appendix 3Y (director interests) needs a paid/archive feed — not yet wired."]
     with open(os.path.join(data_dir, "backtest_summary.json"), "w") as f:
         json.dump(summary, f, indent=2)
     log(f"wrote {len(df)} events; summary saved")
@@ -473,6 +582,7 @@ def main():
     a = ap.parse_args()
     if a.self_test:
         from . import test_factor  # noqa: F401
+        from . import test_insiders  # noqa: F401
         return
     markets = [m.strip() for m in a.markets.split(",") if m.strip()] or list(cfg.MARKETS)
     run(markets, a.years, a.data_dir, a.limit)

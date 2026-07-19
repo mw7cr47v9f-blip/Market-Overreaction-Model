@@ -79,5 +79,8 @@ ok("target return ~ pre/entry-1 (+42.9%)", abs(xr["r_target"] - (10/7 - 1)) < 0.
 never = pd.Series([10.0]*8 + [10.0, 9.0, 7.0] + [7.0]*20)  # entry 7, never gets back to 10
 xr2 = exit_rules(never, {"pos": 10, "window_len": 2})
 ok("never-recover flagged", xr2["recovered"] is False)
+sl = pd.Series([10.0]*8 + [10.0, 9.0, 8.0, 7.2] + [7.2]*30)  # entry 8, falls to 7.2 (-10%)
+xr3 = exit_rules(sl, {"pos": 10, "window_len": 2})
+ok("8% stop-loss fires on the further drop", abs(xr3["r_sl8"] - (7.2/8 - 1)) < 0.01)
 
 print(f"\nALL {passed} FACTOR ASSERTIONS PASSED")
