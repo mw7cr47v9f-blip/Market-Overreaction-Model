@@ -35,19 +35,24 @@ def _df(close, vol_shares):
     return pd.DataFrame({"Close": close, "Volume": np.full(N, vol_shares)}, index=IDX)
 
 UNIVERSE = pd.DataFrame({
-    "code": ["AAA", "BIG", "SML", "CALM"],
-    "name": ["Alpha Ltd", "Big Cap Ltd", "Small Ltd", "Calm Ltd"],
-    "yahoo": ["AAA.AX", "BIG.AX", "SML.AX", "CALM.AX"],
+    "code": ["AAA", "BIG", "SML", "CALM", "AVOI"],
+    "name": ["Alpha Ltd", "Big Cap Ltd", "Small Ltd", "Calm Ltd", "Avoid Mining"],
+    "yahoo": ["AAA.AX", "BIG.AX", "SML.AX", "CALM.AX", "AVOI.AX"],
+    # sector drives the locked favoured-only alert filter
+    "sector": ["Information Technology", "Industrials", "Software & Services",
+               "Information Technology", "Materials"],
 })
 PRICES = {
     "AAA.AX":  _df(_crash_last(_quiet(N, 0.01, seed=1), -0.18), 5_000_000),   # mid cap crash
     "BIG.AX":  _df(_crash_last(_quiet(N, 0.01, seed=2), -0.15), 5_000_000),   # large cap crash
     "SML.AX":  _df(_crash_last(_quiet(N, 0.01, seed=3), -0.18), 5_000_000),   # sub-$100m -> drop
     "CALM.AX": _df(_quiet(N, 0.01, seed=4), 5_000_000),                       # no crash
+    "AVOI.AX": _df(_crash_last(_quiet(N, 0.01, seed=5), -0.18), 5_000_000),   # crash but AVOID sector
 }
 BENCHES = {cfg.BENCHMARK_200: pd.Series(_quiet(N, 0.003, 7000, 99), index=IDX),
            cfg.BENCHMARK_300: pd.Series(_quiet(N, 0.003, 7000, 98), index=IDX)}
-CAPS = {"AAA.AX": 800_000_000, "BIG.AX": 12_000_000_000, "SML.AX": 50_000_000}
+CAPS = {"AAA.AX": 800_000_000, "BIG.AX": 12_000_000_000, "SML.AX": 50_000_000,
+        "AVOI.AX": 2_000_000_000}
 
 
 def install(monkey):
@@ -79,17 +84,24 @@ def main():
         run_once(d)
         new = json.load(open(os.path.join(d, "candidates_new.json")))
         tickers = {c["ticker"] for c in new["candidates"]}
-        check("AAA (mid-cap crash) flagged", "AAA" in tickers)
-        check("BIG (large-cap crash) flagged", "BIG" in tickers)
+        check("AAA (favoured mid-cap crash) alerted", "AAA" in tickers)
+        check("BIG (favoured large-cap crash) alerted", "BIG" in tickers)
         check("SML (sub-$100m) NOT flagged", "SML" not in tickers)
         check("CALM (no crash) NOT flagged", "CALM" not in tickers)
+        check("AVOI (avoid-sector crash) NOT alerted", "AVOI" not in tickers)
         big = next(c for c in new["candidates"] if c["ticker"] == "BIG")
         check("BIG benchmarked vs ASX200", big["benchmark"] == cfg.BENCHMARK_200)
+        check("BIG tagged favoured + sector attached", big.get("favoured") is True and big.get("sector"))
         aaa = next(c for c in new["candidates"] if c["ticker"] == "AAA")
         check("AAA benchmarked vs ASX300", aaa["benchmark"] == cfg.BENCHMARK_300)
         allcsv = pd.read_csv(os.path.join(d, "candidates_all.csv"))
         check("candidates_all.csv has status=New", (allcsv["status"] == "New").all())
-        check("state.json records seen keys", len(json.load(open(os.path.join(d, "state.json")))["seen"]) == 2)
+        check("AVOI logged to candidates_all (not alerted)", "AVOI" in set(allcsv["ticker"]))
+        check("candidates_all carries sector column", "sector" in allcsv.columns)
+        # all three size+price qualifiers (AAA, BIG, AVOI) are de-duped in state
+        check("state.json records 3 seen keys", len(json.load(open(os.path.join(d, "state.json")))["seen"]) == 3)
+        model = json.load(open(os.path.join(d, "ledger_status.json")))["model"]
+        check("ledger opened 2 favoured model positions", model["n_open"] == 2)
 
         print("Second run (same data) — must dedup to zero new:")
         run_once(d)

@@ -21,6 +21,23 @@ VOL_LOOKBACK = 90            # trailing trading days for the volatility baseline
 MIN_VOL_OBS = 40            # min trailing returns to trust the vol estimate
 HISTORY_CALENDAR_DAYS = 200
 
+# ---- Sector tilt (the locked model favours these, hard-excludes the avoids) --
+# Backtest verdict: favoured-only book had the best risk-adjusted return (Sharpe
+# ~1.5); the avoid-sectors LOST to the market at equal volatility. See methodology.
+import re as _re
+FAVOURED_SECTORS_RE = (r"information technology|software|semiconductor|technology hardware|"
+                       r"discretionary|industrial|capital goods|automobile")
+AVOID_SECTORS_RE = r"material|pharma|biotech|telecom|real estate"
+HOLD_MONTHS = 3             # locked time-based exit; no price stop-loss
+
+
+def is_favoured(sector) -> bool:
+    return bool(_re.search(FAVOURED_SECTORS_RE, str(sector).lower()))
+
+
+def is_avoided(sector) -> bool:
+    return bool(_re.search(AVOID_SECTORS_RE, str(sector).lower()))
+
 # ---- Per-market settings -------------------------------------------------
 
 MARKETS = {

@@ -29,6 +29,7 @@ import pandas as pd
 from . import config as cfg
 from . import data as datamod
 from . import state as statemod
+from . import ledger as ledgermod
 from .stats import evaluate_series
 
 
@@ -53,7 +54,7 @@ def screen_market(name: str, data_dir: str, limit: int = 0):
     b_large = benches.get(mcfg.BENCHMARK_200)
     if b_small is None and b_large is None:
         log(f"{name}: no benchmark data — skipping market")
-        return [], prices
+        return [], prices, uni
     if b_small is None:
         b_small = b_large
     if b_large is None:
@@ -81,7 +82,7 @@ def screen_market(name: str, data_dir: str, limit: int = 0):
         if c is not None:
             finals.append(c)
     log(f"{name}: stage-2 size-qualifying = {len(finals)}")
-    return finals, prices
+    return finals, prices, uni
 
 
 def main():
@@ -93,7 +94,8 @@ def main():
     args = ap.parse_args()
 
     if args.self_test:
-        from . import test_stats  # noqa: F401  (runs assertions on import)
+        from . import test_stats   # noqa: F401  (runs assertions on import)
+        from . import test_ledger  # noqa: F401
         return
 
     os.makedirs(args.data_dir, exist_ok=True)
@@ -103,14 +105,26 @@ def main():
     markets = [m.strip() for m in args.markets.split(",") if m.strip()] or list(cfg.MARKETS)
 
     all_finals, latest_by_market, all_prices = [], {}, {}
+    sector_by_mc, yahoo_by_mc = {}, {}   # (market, code) -> sector / yahoo ticker
     for m in markets:
         try:
-            finals, prices = screen_market(m, args.data_dir, args.limit)
+            finals, prices, uni = screen_market(m, args.data_dir, args.limit)
             all_finals.extend(finals)
             all_prices.update(prices)
             latest_by_market[m] = _latest_scan_date(prices)
+            for _, row in uni.iterrows():
+                sector_by_mc[(m, row["code"])] = row.get("sector")
+                yahoo_by_mc[(m, row["code"])] = row["yahoo"]
         except Exception as e:  # noqa: BLE001
             log(f"market {m} failed: {e!r}")
+
+    def price_lookup(market, ticker):
+        y = yahoo_by_mc.get((market, str(ticker).upper()))
+        df = all_prices.get(y) if y else None
+        if df is None or len(df) == 0:
+            return None
+        s = df["Close"].dropna()
+        return float(s.iloc[-1]) if len(s) else None
 
     # Dedup across all markets
     seen = statemod.load_seen(state_path)
@@ -118,13 +132,40 @@ def main():
     scan_date = _latest_scan_date(all_prices)
     log(f"new events this run: {len(new)} (of {len(all_finals)} live across {len(markets)} market(s))")
 
-    new_rows = [c.to_dict() for c in new]
+    # Attach sector + the locked-model favoured/avoid tags to every new candidate.
+    new_rows = []
+    for c in new:
+        d = c.to_dict()
+        sec = sector_by_mc.get((c.market, c.ticker))
+        d["sector"] = sec
+        d["favoured"] = cfg.is_favoured(sec)
+        d["avoided"] = cfg.is_avoided(sec)
+        new_rows.append(d)
+    favoured_new = [d for d in new_rows if d["favoured"]]
+    log(f"favoured-sector (alerted): {len(favoured_new)} of {len(new_rows)} new")
+
+    # Log EVERYTHING (with tags) to the running CSV; ALERT only favoured names.
     statemod.append_candidates(all_csv, new_rows)
-    statemod.write_new(os.path.join(args.data_dir, "candidates_new.json"), new_rows, scan_date)
+    statemod.write_new(os.path.join(args.data_dir, "candidates_new.json"), favoured_new, scan_date)
     statemod.save_state(state_path, seen.union({c.key() for c in all_finals}), scan_date)
 
-    # Primary-source pre-fetch, dispatched per market
-    _fetch_announcements(new, args.data_dir)
+    # BUY/SELL ledger: model book (favoured signals, 3-month hold) + personal holdings.
+    try:
+        model_buys = [{"market": d["market"], "ticker": d["ticker"], "name": d["name"],
+                       "sector": d.get("sector"), "entry_date": scan_date,
+                       "entry_price": d["last_close"]} for d in favoured_new]
+        model_report = ledgermod.update_model_ledger(args.data_dir, model_buys, price_lookup, scan_date)
+        holdings = ledgermod.holdings_status(args.data_dir, price_lookup, scan_date)
+        ledgermod.write_status(args.data_dir, model_report, holdings)
+        log(f"ledger: {len(model_report['new_buys'])} new, {model_report['n_open']} open, "
+            f"{len(model_report['closed_this_run'])} closed this run, {len(holdings)} personal holdings")
+    except Exception as e:  # noqa: BLE001
+        log(f"ledger update failed: {e!r}")
+
+    # Primary-source pre-fetch, dispatched per market (favoured names only)
+    favoured_keys = {(d["market"], d["ticker"], d["event_date"]) for d in favoured_new}
+    _fetch_announcements([c for c in new if (c.market, c.ticker, c.event_date) in favoured_keys],
+                         args.data_dir)
     _print_summary(new, scan_date, latest_by_market)
 
 
