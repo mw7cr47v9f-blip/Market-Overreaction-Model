@@ -242,7 +242,9 @@ def run(markets, years, data_dir, limit=0):
             uni = uni.head(limit)
         prices = datamod.download_prices(list(uni["yahoo"]), period_days=int(years*365)+260)
         benches = datamod.download_benchmarks(mcfg, period_days=int(years*365)+260)
-        bench = benches.get(mcfg.BENCHMARK_300) or benches.get(mcfg.BENCHMARK_200)
+        bench = benches.get(mcfg.BENCHMARK_300)      # None or a pandas Series
+        if bench is None:
+            bench = benches.get(mcfg.BENCHMARK_200)
         if bench is None:
             log(f"{name}: no benchmark, skipping"); continue
         name_by = dict(zip(uni["yahoo"], uni["name"])); code_by = dict(zip(uni["yahoo"], uni["code"]))
