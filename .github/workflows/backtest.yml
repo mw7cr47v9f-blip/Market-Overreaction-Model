@@ -1,0 +1,42 @@
+name: Factor backtest (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      years:
+        description: "Years of history to scan"
+        default: "5"
+      markets:
+        description: "Markets (blank = ASX and US)"
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: factor-backtest
+  cancel-in-progress: false
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Self-test (factor logic)
+        run: python -m screener.backtest_factor --self-test
+      - name: Run backtest
+        run: python -m screener.backtest_factor --years "${{ inputs.years }}" --markets "${{ inputs.markets }}" --data-dir data
+      - name: Commit results
+        run: |
+          git config user.name  "asx-screen-bot"
+          git config user.email "actions@github.com"
+          git add data/backtest_events.csv data/backtest_summary.json
+          if git diff --cached --quiet; then echo "No changes."; else
+            git commit -m "Factor backtest $(date -u +%Y-%m-%d)"; git push; fi
