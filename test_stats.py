@@ -1,134 +1,125 @@
 """
-Orchestrator. Runs daily on GitHub Actions after the ASX close.
-
-  python -m screener.run --data-dir data
-  python -m screener.run --self-test        # offline logic check, no network
-
-Two-stage flow for efficiency:
-  Stage 1  bulk price screen over the WHOLE universe (prices are cheap) ->
-           small shortlist that meets z-score / index-relative / >=10% / liquidity
-  Stage 2  fetch market cap only for the shortlist, apply the >=$100m size gate
-           and the size-appropriate benchmark, finalise figures
-Then dedup against state.json and emit only genuinely-new events.
+Synthetic unit tests for the statistical core. Run: python -m screener.test_stats
+Each case constructs a price series with a KNOWN answer and asserts the screen
+does the right thing. No network, fully deterministic.
 """
-from __future__ import annotations
-
-import argparse
 import math
-import os
-import sys
-
+import numpy as np
 import pandas as pd
 
-from . import config as cfg
-from . import data as datamod
-from . import state as statemod
-from .stats import evaluate_series
+from screener import config as cfg
+from screener.stats import evaluate_series, Candidate
 
 
-def log(msg: str):
-    print(f"[run] {msg}", file=sys.stderr, flush=True)
+def _dates(n):
+    return pd.bdate_range("2026-01-01", periods=n)
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--data-dir", default="data")
-    ap.add_argument("--self-test", action="store_true")
-    ap.add_argument("--limit", type=int, default=0, help="cap universe size (debug)")
-    args = ap.parse_args()
-
-    if args.self_test:
-        from . import test_stats  # noqa: F401  (runs assertions on import)
-        return
-
-    os.makedirs(args.data_dir, exist_ok=True)
-    state_path = os.path.join(args.data_dir, "state.json")
-    all_csv = os.path.join(args.data_dir, "candidates_all.csv")
-    universe_fallback = os.path.join(args.data_dir, "universe.csv")
-
-    # 1. Universe
-    uni = datamod.get_universe(local_fallback=universe_fallback if os.path.exists(universe_fallback) else None)
-    if args.limit:
-        uni = uni.head(args.limit)
-    name_by_yahoo = dict(zip(uni["yahoo"], uni["name"]))
-    code_by_yahoo = dict(zip(uni["yahoo"], uni["code"]))
-
-    # 2. Prices + benchmarks
-    prices = datamod.download_prices(list(uni["yahoo"]))
-    benches = datamod.download_benchmarks()
-    bench300 = benches.get(cfg.BENCHMARK_300)
-    bench200 = benches.get(cfg.BENCHMARK_200)
-    if bench300 is None and bench200 is None:
-        raise RuntimeError("No benchmark index data — cannot compute index-relative move.")
-    bench300 = bench300 if bench300 is not None else bench200
-    bench200 = bench200 if bench200 is not None else bench300
-
-    # 3. Stage 1 — price screen over everything (size gate bypassed via inf cap)
-    shortlist = []
-    for y, df in prices.items():
-        c = evaluate_series(code_by_yahoo.get(y, y), name_by_yahoo.get(y, y),
-                            df["Close"], df["Volume"], bench300,
-                            market_cap=math.inf, cfg=cfg)
-        if c is not None:
-            shortlist.append((y, df))
-    log(f"stage 1 price-qualifying shortlist: {len(shortlist)}")
-
-    # 4. Stage 2 — real market cap + size gate + size-appropriate benchmark
-    caps = datamod.get_market_caps([y for y, _ in shortlist]) if shortlist else {}
-    finals = []
-    for y, df in shortlist:
-        cap = caps.get(y)
-        if cap is None or cap < cfg.MIN_MARKET_CAP:
-            continue
-        bench = bench200 if cap >= cfg.LARGE_CAP_CUTOFF else bench300
-        c = evaluate_series(code_by_yahoo.get(y, y), name_by_yahoo.get(y, y),
-                            df["Close"], df["Volume"], bench, market_cap=cap, cfg=cfg)
-        if c is not None:
-            finals.append(c)
-    log(f"stage 2 size-qualifying candidates: {len(finals)}")
-
-    # 5. Dedup against state
-    seen = statemod.load_seen(state_path)
-    new = [c for c in finals if c.key() not in seen]
-    scan_date = _latest_scan_date(prices)
-    log(f"genuinely-new events this run: {len(new)} (of {len(finals)} live)")
-
-    # 6. Persist
-    new_rows = [c.to_dict() for c in new]
-    statemod.append_candidates(all_csv, new_rows)
-    statemod.write_new(os.path.join(args.data_dir, "candidates_new.json"), new_rows, scan_date)
-    statemod.save_state(state_path, seen.union({c.key() for c in finals}), scan_date)
-
-    # 7. Announcements for the new names (best effort; feeds the analysis step)
-    try:
-        from . import announcements
-        announcements.fetch_for_candidates(new, args.data_dir)
-    except Exception as e:  # noqa: BLE001
-        log(f"announcement fetch skipped/failed: {e!r}")
-
-    # 8. Human-readable console summary (also captured in the Actions log)
-    _print_summary(new, scan_date)
+def _quiet_series(n, daily_vol=0.01, start=10.0, seed=0):
+    """A calm stock: small gaussian daily returns, low volatility."""
+    rng = np.random.default_rng(seed)
+    rets = rng.normal(0, daily_vol, n)
+    rets[0] = 0
+    close = start * np.cumprod(1 + rets)
+    return pd.Series(close, index=_dates(n))
 
 
-def _latest_scan_date(prices: dict) -> str:
-    latest = None
-    for df in prices.values():
-        d = df.index.max()
-        if latest is None or d > latest:
-            latest = d
-    return pd.Timestamp(latest).date().isoformat() if latest is not None else "unknown"
+def _flat_bench(n, start=7000.0):
+    # benchmark barely moves (broad market calm)
+    rng = np.random.default_rng(99)
+    rets = rng.normal(0, 0.004, n)
+    rets[0] = 0
+    return pd.Series(start * np.cumprod(1 + rets), index=_dates(n))
 
 
-def _print_summary(new, scan_date):
-    print("\n" + "=" * 68)
-    print(f"ASX OVERREACTION SCREEN — scan date {scan_date}")
-    print(f"New candidates: {len(new)}")
-    for c in sorted(new, key=lambda x: x.z_score):
-        print(f"  {c.ticker:6} {c.name[:28]:28} "
-              f"{c.raw_return*100:6.1f}%  idx-rel {c.index_relative*100:6.1f}pp  "
-              f"z={c.z_score:5.1f}  {c.window_len}d  cap ${c.market_cap/1e6:,.0f}m")
-    print("=" * 68)
+def _big_vol(n):
+    return pd.Series(np.full(n, 1e9), index=_dates(n))  # ample liquidity
 
 
-if __name__ == "__main__":
-    main()
+N = 140
+BENCH = _flat_bench(N)
+CAP = 800_000_000  # $800m, clears size gate, benchmarked vs ASX 300
+
+
+def _apply_crash(close, day_from_end, pct):
+    """Multiply price from `day_from_end` (e.g. -1 = last day) onward by (1+pct)."""
+    close = close.copy()
+    idx = len(close) + day_from_end
+    close.iloc[idx:] = close.iloc[idx:] * (1 + pct)
+    return close
+
+
+passed = 0
+def check(name, cond):
+    global passed
+    assert cond, f"FAILED: {name}"
+    passed += 1
+    print(f"  ok  {name}")
+
+
+print("Case 1: quiet stock, single -18% crash on last day, flat market -> FLAG")
+close = _apply_crash(_quiet_series(N, 0.01, seed=1), -1, -0.18)
+c = evaluate_series("AAA", "Alpha", close, _big_vol(N), BENCH, CAP, cfg)
+check("candidate returned", isinstance(c, Candidate))
+check("raw return ~ -18%", abs(c.raw_return - (-0.18)) < 0.02)
+check("z is deeply negative", c.z_score < -3.0)
+check("index-relative below -10pp", c.index_relative <= -0.10)
+check("event_date == last day", c.event_date == close.index[-1].date().isoformat())
+check("benchmark is ASX300 for mid cap", c.benchmark == cfg.BENCHMARK_300)
+
+print("Case 2: high-vol stock, noisy but no window <= -10% -> NO FLAG")
+close = _quiet_series(N, 0.05, seed=2)  # 5%/day vol, drifts, no single big drop
+c = evaluate_series("BBB", "Beta", close, _big_vol(N), BENCH, CAP, cfg)
+check("no candidate (no >=10% window)", c is None)
+
+print("Case 3: -18% drop but market ALSO -18% (broad selloff) -> NO FLAG (cond2)")
+close = _apply_crash(_quiet_series(N, 0.01, seed=3), -1, -0.18)
+bench_crash = _apply_crash(BENCH.copy(), -1, -0.18)
+c = evaluate_series("CCC", "Gamma", close, _big_vol(N), bench_crash, CAP, cfg)
+check("no candidate (index-relative not extreme)", c is None)
+
+print("Case 4: quiet -18% crash but THIN volume -> NO FLAG (liquidity)")
+close = _apply_crash(_quiet_series(N, 0.01, seed=4), -1, -0.18)
+thin_vol = pd.Series(np.full(N, 100.0), index=_dates(N))  # 100 shares * ~$10 = ~$1k/day
+c = evaluate_series("DDD", "Delta", close, thin_vol, BENCH, CAP, cfg)
+check("no candidate (below liquidity floor)", c is None)
+
+print("Case 5: quiet -18% crash but SUB-$100m cap -> NO FLAG (size)")
+close = _apply_crash(_quiet_series(N, 0.01, seed=5), -1, -0.18)
+c = evaluate_series("EEE", "Eps", close, _big_vol(N), BENCH, 50_000_000, cfg)
+check("no candidate (below size floor)", c is None)
+
+print("Case 6: 3-day cumulative -15% slide (no single big day) -> FLAG on window")
+base = _quiet_series(N, 0.012, seed=6)
+base = _apply_crash(base, -3, -0.065)
+base = _apply_crash(base, -2, -0.065)
+base = _apply_crash(base, -1, -0.065)  # compounding ~ -18% over 3 days (clears 15% floor)
+c = evaluate_series("FFF", "Zeta", base, _big_vol(N), BENCH, CAP, cfg)
+check("candidate returned for multi-day slide", isinstance(c, Candidate))
+check("window length between 3 and 5", 3 <= c.window_len <= 5)
+check("raw drop >= 10%", c.raw_return <= -0.10)
+
+print("Case 7: dedup identity stable as window rolls forward one day")
+# Same crash observed on day t, then re-observed on day t+1 (one more calm day).
+close_t = _apply_crash(_quiet_series(N, 0.01, seed=7), -2, -0.18)   # crash 2nd-last day
+close_t = close_t.iloc[:-1]                                          # 'today' = crash day
+c_t = evaluate_series("GGG", "Eta", close_t, _big_vol(N-1), BENCH.iloc[:-1], CAP, cfg)
+close_t1 = _apply_crash(_quiet_series(N, 0.01, seed=7), -2, -0.18)  # +1 calm day after
+c_t1 = evaluate_series("GGG", "Eta", close_t1, _big_vol(N), BENCH, CAP, cfg)
+check("both days flag", c_t is not None and c_t1 is not None)
+check("SAME dedup key across the two scan days", c_t.key() == c_t1.key())
+
+print("Case 8: US market params flow through the (unchanged) stats core")
+us = cfg.market_params("US")
+check("US large benchmark = S&P 500", us.BENCHMARK_200 == "^GSPC")
+check("US small benchmark = Russell 2000", us.BENCHMARK_300 == "^RUT")
+check("US size floor US$1bn", us.MIN_MARKET_CAP == 1_000_000_000)
+closeu = _apply_crash(_quiet_series(N, 0.012, seed=8), -1, -0.20)
+cu = evaluate_series("IBM", "Intl Business Machines", closeu, _big_vol(N), BENCH, 30_000_000_000, us)
+check("US candidate returned", isinstance(cu, Candidate))
+check("tagged market US", cu.market == "US")
+check("currency USD", cu.currency == "USD")
+check("US mega-cap benchmarked vs S&P 500", cu.benchmark == "^GSPC")
+check("dedup key namespaced by market", cu.key().startswith("US:IBM:"))
+
+print(f"\nALL {passed} ASSERTIONS PASSED")

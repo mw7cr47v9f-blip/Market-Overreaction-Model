@@ -1,74 +1,88 @@
 """
-Best-effort ASX announcement capture for each new candidate.
+Configuration for the multi-market overreaction screen.
 
-Runs on the GitHub Actions runner (full internet). For every new candidate it
-pulls the company's recent announcements from the ASX platform around the event
-date and writes them to data/announcements/<TICKER>_<eventdate>.json, including
-the price-sensitive flag and the PDF URL. The daily Claude task then reads these
-as the STARTING POINT for the primary-source analysis (it still opens the actual
-announcement / the company's own results release before making any claim).
-
-If the endpoint shape changes, this fails soft — the screen still produces
-candidates; only the pre-fetched announcement convenience list is missing.
+Global statistical thresholds are shared across markets; everything that differs
+by market (universe source, benchmarks, size/liquidity floors, currency, and the
+primary-source announcement feed) lives in MARKETS. `market_params(name)` merges
+the two into one namespace with the attribute names stats.py expects, so the
+statistical core stays completely market-agnostic.
 """
-from __future__ import annotations
+from types import SimpleNamespace
 
-import json
-import os
-import sys
-from datetime import date, timedelta
+# ---- Global statistical thresholds (same in every market) ----------------
 
-ASX_ANN_URL = ("https://asx.api.markitdigital.com/asx-research/1.0/companies/"
-               "{code}/announcements?pageSize=30&access_token="
-               "83ff96335c2d45a094df02a206a39ff4")
+Z_THRESHOLD = -2.5           # window return <= this many SD below zero
+INDEX_REL_THRESHOLD = -0.10  # underperform benchmark by >= 10pp
+ABS_DROP_THRESHOLD = -0.15   # raw decline >= 15% (tightened from 10%: backtest showed
+                             # the edge is concentrated in deeper drops — 10-15% falls
+                             # barely beat the market, 15-30% falls win ~65-70%)
+WINDOW_LENGTHS = [1, 2, 3, 4, 5]
+VOL_LOOKBACK = 90            # trailing trading days for the volatility baseline
+MIN_VOL_OBS = 40            # min trailing returns to trust the vol estimate
+HISTORY_CALENDAR_DAYS = 200
+
+# ---- Per-market settings -------------------------------------------------
+
+MARKETS = {
+    "ASX": {
+        "suffix": ".AX",
+        "currency": "AUD",
+        "min_market_cap": 100_000_000,       # >= A$100m
+        "min_avg_daily_value": 150_000,      # A$/day liquidity floor
+        "large_cap_cutoff": 5_000_000_000,   # >= A$5bn benchmarks vs ASX 200
+        "benchmark_large": "^AXJO",          # S&P/ASX 200
+        "benchmark_small": "^AXKO",          # S&P/ASX 300
+        "universe": "asx_directory",
+        "announcements": "asx",
+    },
+    "US": {
+        "suffix": "",
+        "currency": "USD",
+        # Universe is the S&P 1500 (large+mid+small); its members already sit
+        # comfortably above US$1bn, so we set the floor there and skip the long
+        # tail of micro-caps (keeps the daily yfinance pull tractable). Flagged.
+        "min_market_cap": 1_000_000_000,     # >= US$1bn
+        "min_avg_daily_value": 2_000_000,    # US$/day liquidity floor (US trades heavier)
+        "large_cap_cutoff": 20_000_000_000,  # >= US$20bn benchmarks vs S&P 500
+        "benchmark_large": "^GSPC",          # S&P 500
+        "benchmark_small": "^RUT",           # Russell 2000
+        "universe": "sp1500",
+        "announcements": "sec",
+    },
+}
+
+# ASX module-level defaults kept so the config module itself doubles as an ASX
+# params object (used by the unit tests).
+_m = MARKETS["ASX"]
+MARKET = "ASX"
+SUFFIX = _m["suffix"]
+CURRENCY = _m["currency"]
+MIN_MARKET_CAP = _m["min_market_cap"]
+MIN_AVG_DAILY_VALUE = _m["min_avg_daily_value"]
+LARGE_CAP_CUTOFF = _m["large_cap_cutoff"]
+BENCHMARK_200 = _m["benchmark_large"]
+BENCHMARK_300 = _m["benchmark_small"]
+
+_GLOBALS = ["Z_THRESHOLD", "INDEX_REL_THRESHOLD", "ABS_DROP_THRESHOLD",
+            "WINDOW_LENGTHS", "VOL_LOOKBACK", "MIN_VOL_OBS", "HISTORY_CALENDAR_DAYS"]
 
 
-def log(msg: str):
-    print(f"[announce] {msg}", file=sys.stderr, flush=True)
-
-
-def fetch_for_candidates(candidates, data_dir: str, window_days: int = 7):
-    import requests
-    out_dir = os.path.join(data_dir, "announcements")
-    os.makedirs(out_dir, exist_ok=True)
-
-    for c in candidates:
-        try:
-            ev = date.fromisoformat(c.event_date)
-            lo, hi = ev - timedelta(days=window_days), ev + timedelta(days=2)
-            url = ASX_ANN_URL.format(code=c.ticker)
-            r = requests.get(url, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
-            r.raise_for_status()
-            payload = r.json()
-            items = payload.get("data", {}).get("items", payload.get("data", []))
-            near = []
-            for a in items:
-                ad = _parse_date(a.get("documentDate") or a.get("date") or "")
-                if ad and lo <= ad <= hi:
-                    near.append({
-                        "date": ad.isoformat(),
-                        "headline": a.get("header") or a.get("title"),
-                        "price_sensitive": bool(a.get("isPriceSensitive") or a.get("marketSensitive")),
-                        "pdf_url": a.get("url") or a.get("pdfUrl"),
-                        "pages": a.get("pageCount") or a.get("numberOfPages"),
-                    })
-            rec = {
-                "ticker": c.ticker, "name": c.name, "event_date": c.event_date,
-                "window": [c.window_start, c.window_end],
-                "raw_return": c.raw_return, "index_relative": c.index_relative,
-                "z_score": c.z_score, "announcements": near,
-            }
-            path = os.path.join(out_dir, f"{c.ticker}_{c.event_date}.json")
-            with open(path, "w") as f:
-                json.dump(rec, f, indent=2)
-            log(f"{c.ticker}: {len(near)} announcement(s) near {c.event_date}")
-        except Exception as e:  # noqa: BLE001
-            log(f"{c.ticker}: announcement fetch failed: {e!r}")
-
-
-def _parse_date(s: str):
-    s = str(s)[:10]
-    try:
-        return date.fromisoformat(s)
-    except Exception:  # noqa: BLE001
-        return None
+def market_params(name: str) -> SimpleNamespace:
+    """Return a namespace carrying every attribute stats.py reads, for `name`.
+    BENCHMARK_200/300 are reused as the large/small benchmark slots regardless
+    of market so the statistical core needs no changes."""
+    m = MARKETS[name]
+    ns = SimpleNamespace()
+    for k in _GLOBALS:
+        setattr(ns, k, globals()[k])
+    ns.MARKET = name
+    ns.SUFFIX = m["suffix"]
+    ns.CURRENCY = m["currency"]
+    ns.MIN_MARKET_CAP = m["min_market_cap"]
+    ns.MIN_AVG_DAILY_VALUE = m["min_avg_daily_value"]
+    ns.LARGE_CAP_CUTOFF = m["large_cap_cutoff"]
+    ns.BENCHMARK_200 = m["benchmark_large"]
+    ns.BENCHMARK_300 = m["benchmark_small"]
+    ns.UNIVERSE = m["universe"]
+    ns.ANNOUNCEMENTS = m["announcements"]
+    return ns
