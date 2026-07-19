@@ -1,0 +1,351 @@
+{
+  "n_events": 13255,
+  "by_metric": {
+    "profitable": {
+      "yes": {
+        "n": 6409,
+        "3m": {
+          "n": 5981,
+          "mean": 0.0604,
+          "median": 0.034,
+          "hit_rate": 0.566,
+          "std": 0.2585,
+          "mean_excess": 0.0125,
+          "ir_like": 0.234
+        },
+        "6m": {
+          "n": 5362,
+          "mean": 0.1039,
+          "median": 0.0529,
+          "hit_rate": 0.58,
+          "std": 0.3663,
+          "mean_excess": 0.0256,
+          "ir_like": 0.284
+        }
+      },
+      "no": {
+        "n": 2863,
+        "3m": {
+          "n": 2738,
+          "mean": 0.0441,
+          "median": 0.0,
+          "hit_rate": 0.494,
+          "std": 0.3997,
+          "mean_excess": 0.0136,
+          "ir_like": 0.11
+        },
+        "6m": {
+          "n": 2502,
+          "mean": 0.0793,
+          "median": -0.0366,
+          "hit_rate": 0.46,
+          "std": 0.6403,
+          "mean_excess": 0.0284,
+          "ir_like": 0.124
+        }
+      }
+    },
+    "roe": {
+      "<0": {
+        "n": 2891,
+        "3m": {
+          "n": 2763,
+          "mean": 0.0433,
+          "median": 0.0,
+          "hit_rate": 0.496,
+          "std": 0.3958,
+          "mean_excess": 0.012,
+          "ir_like": 0.109
+        },
+        "6m": {
+          "n": 2513,
+          "mean": 0.0802,
+          "median": -0.033,
+          "hit_rate": 0.464,
+          "std": 0.6366,
+          "mean_excess": 0.0276,
+          "ir_like": 0.126
+        }
+      },
+      "0-5%": {
+        "n": 849,
+        "3m": {
+          "n": 801,
+          "mean": 0.0434,
+          "median": 0.0158,
+          "hit_rate": 0.517,
+          "std": 0.2713,
+          "mean_excess": 0.0011,
+          "ir_like": 0.16
+        },
+        "6m": {
+          "n": 710,
+          "mean": 0.0818,
+          "median": 0.006,
+          "hit_rate": 0.507,
+          "std": 0.4218,
+          "mean_excess": 0.0078,
+          "ir_like": 0.194
+        }
+      },
+      "5-10%": {
+        "n": 1171,
+        "3m": {
+          "n": 1091,
+          "mean": 0.05,
+          "median": 0.027,
+          "hit_rate": 0.554,
+          "std": 0.2329,
+          "mean_excess": 0.0027,
+          "ir_like": 0.215
+        },
+        "6m": {
+          "n": 978,
+          "mean": 0.0979,
+          "median": 0.0433,
+          "hit_rate": 0.57,
+          "std": 0.3493,
+          "mean_excess": 0.0181,
+          "ir_like": 0.28
+        }
+      },
+      "10-15%": {
+        "n": 1206,
+        "3m": {
+          "n": 1124,
+          "mean": 0.065,
+          "median": 0.0343,
+          "hit_rate": 0.58,
+          "std": 0.2342,
+          "mean_excess": 0.01,
+          "ir_like": 0.278
+        },
+        "6m": {
+          "n": 996,
+          "mean": 0.0901,
+          "median": 0.0617,
+          "hit_rate": 0.597,
+          "std": 0.3218,
+          "mean_excess": 0.0074,
+          "ir_like": 0.28
+        }
+      },
+      ">15%": {
+        "n": 3133,
+        "3m": {
+          "n": 2919,
+          "mean": 0.0681,
+          "median": 0.04,
+          "hit_rate": 0.577,
+          "std": 0.2753,
+          "mean_excess": 0.022,
+          "ir_like": 0.247
+        },
+        "6m": {
+          "n": 2649,
+          "mean": 0.1169,
+          "median": 0.0626,
+          "hit_rate": 0.594,
+          "std": 0.3753,
+          "mean_excess": 0.0414,
+          "ir_like": 0.311
+        }
+      }
+    },
+    "de": {
+      "<0.3": {
+        "n": 3843,
+        "3m": {
+          "n": 3653,
+          "mean": 0.0461,
+          "median": 0.0097,
+          "hit_rate": 0.512,
+          "std": 0.3454,
+          "mean_excess": 0.0122,
+          "ir_like": 0.133
+        },
+        "6m": {
+          "n": 3286,
+          "mean": 0.0825,
+          "median": 0.0,
+          "hit_rate": 0.499,
+          "std": 0.5504,
+          "mean_excess": 0.0256,
+          "ir_like": 0.15
+        }
+      },
+      "0.3-0.75": {
+        "n": 2233,
+        "3m": {
+          "n": 2087,
+          "mean": 0.0666,
+          "median": 0.0414,
+          "hit_rate": 0.581,
+          "std": 0.2573,
+          "mean_excess": 0.019,
+          "ir_like": 0.259
+        },
+        "6m": {
+          "n": 1892,
+          "mean": 0.1095,
+          "median": 0.0656,
+          "hit_rate": 0.586,
+          "std": 0.368,
+          "mean_excess": 0.0332,
+          "ir_like": 0.298
+        }
+      },
+      "0.75-1.25": {
+        "n": 1131,
+        "3m": {
+          "n": 1046,
+          "mean": 0.0631,
+          "median": 0.0222,
+          "hit_rate": 0.548,
+          "std": 0.3147,
+          "mean_excess": 0.0106,
+          "ir_like": 0.2
+        },
+        "6m": {
+          "n": 945,
+          "mean": 0.098,
+          "median": 0.0307,
+          "hit_rate": 0.557,
+          "std": 0.4317,
+          "mean_excess": 0.0125,
+          "ir_like": 0.227
+        }
+      },
+      ">1.25": {
+        "n": 1888,
+        "3m": {
+          "n": 1769,
+          "mean": 0.0619,
+          "median": 0.0355,
+          "hit_rate": 0.571,
+          "std": 0.2794,
+          "mean_excess": 0.0134,
+          "ir_like": 0.222
+        },
+        "6m": {
+          "n": 1593,
+          "mean": 0.1165,
+          "median": 0.0481,
+          "hit_rate": 0.575,
+          "std": 0.4187,
+          "mean_excess": 0.0365,
+          "ir_like": 0.278
+        }
+      }
+    },
+    "momentum_6m": {
+      "<-10%": {
+        "n": 4317,
+        "3m": {
+          "n": 4136,
+          "mean": 0.0986,
+          "median": 0.0665,
+          "hit_rate": 0.601,
+          "std": 0.3352,
+          "mean_excess": 0.022,
+          "ir_like": 0.294
+        },
+        "6m": {
+          "n": 3872,
+          "mean": 0.1314,
+          "median": 0.0571,
+          "hit_rate": 0.565,
+          "std": 0.6025,
+          "mean_excess": 0.0296,
+          "ir_like": 0.218
+        }
+      },
+      "-10-0%": {
+        "n": 1760,
+        "3m": {
+          "n": 1705,
+          "mean": 0.0524,
+          "median": 0.0344,
+          "hit_rate": 0.57,
+          "std": 0.273,
+          "mean_excess": 0.0016,
+          "ir_like": 0.192
+        },
+        "6m": {
+          "n": 1598,
+          "mean": 0.075,
+          "median": 0.0382,
+          "hit_rate": 0.556,
+          "std": 0.3541,
+          "mean_excess": -0.0006,
+          "ir_like": 0.212
+        }
+      },
+      "0-20%": {
+        "n": 2912,
+        "3m": {
+          "n": 2810,
+          "mean": 0.0363,
+          "median": 0.0188,
+          "hit_rate": 0.542,
+          "std": 0.2534,
+          "mean_excess": 0.0074,
+          "ir_like": 0.143
+        },
+        "6m": {
+          "n": 2635,
+          "mean": 0.0754,
+          "median": 0.0296,
+          "hit_rate": 0.548,
+          "std": 0.3949,
+          "mean_excess": 0.0259,
+          "ir_like": 0.191
+        }
+      },
+      ">20%": {
+        "n": 4059,
+        "3m": {
+          "n": 3844,
+          "mean": 0.0626,
+          "median": 0.0249,
+          "hit_rate": 0.539,
+          "std": 0.3376,
+          "mean_excess": 0.0307,
+          "ir_like": 0.186
+        },
+        "6m": {
+          "n": 3533,
+          "mean": 0.1321,
+          "median": 0.0354,
+          "hit_rate": 0.542,
+          "std": 0.8684,
+          "mean_excess": 0.0826,
+          "ir_like": 0.152
+        }
+      }
+    }
+  },
+  "baseline_3m": {
+    "n": 12701,
+    "mean": 0.0652,
+    "median": 0.0361,
+    "hit_rate": 0.56,
+    "std": 0.3119,
+    "mean_excess": 0.0185,
+    "ir_like": 0.209
+  },
+  "baseline_6m": {
+    "n": 11839,
+    "mean": 0.1091,
+    "median": 0.0385,
+    "hit_rate": 0.55,
+    "std": 0.6314,
+    "mean_excess": 0.0403,
+    "ir_like": 0.173
+  },
+  "caveats": [
+    "Universe = today's membership; delisted excluded (survivorship bias).",
+    "Fundamentals: yfinance, survivor-only & as-restated, ~4y deep \u2014 INDICATIVE, not point-in-time.",
+    "AU 10y bond yield is a fixed proxy (4.3%)."
+  ]
+}
