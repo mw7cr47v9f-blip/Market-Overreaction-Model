@@ -59,6 +59,36 @@ def is_avoided(sector) -> bool:
     return bool(_re.search(AVOID_SECTORS_RE, str(sector).lower()))
 
 
+# ---- Trigger-type filter (from the 8-K trigger study) ------------------------
+# Drops caused by structural repricing — a lost contract, an impairment/write-down,
+# or distress (bankruptcy/delisting/restatement) — do NOT mean-revert: hit rate 38%,
+# excess -10%/trade, 38% lose >20% (vs 16% for sentiment drops). Rare (~0.2% of
+# events) but toxic, so we hard-exclude them. Sentiment/other catalysts are kept.
+# Fails OPEN: only a POSITIVELY-identified structural 8-K excludes a name; an event
+# with no 8-K ("none") is kept, since those recover fine and are the majority.
+EXCLUDE_STRUCTURAL_TRIGGERS = True
+STRUCTURAL_TRIGGERS = ("contract_loss", "cost_impair", "distress")
+
+
+def is_bad_trigger(trigger_primary) -> bool:
+    return bool(EXCLUDE_STRUCTURAL_TRIGGERS and trigger_primary in STRUCTURAL_TRIGGERS)
+
+
+# ---- Director-buying filter + new exits (staged; validated in the re-run first) ----
+# Prior-6-month director open-market buying lifted the gated cohort to ~70% hit /
+# Sharpe ~1.5. Adopted as a HARD filter (Keegan's call) — accepting a smaller book
+# now, to be rebroadened by adding TSX/LSE (and revisiting ASX) under the new rules.
+# Kept False until the combined backtest (confirmed entry + trailing stop + time exit
+# + this filter) is confirmed and the live insider fetch is wired.
+REQUIRE_DIRECTOR_BUY = False
+USE_TRAILING_STOP = False        # exit via trailing stop rather than flat 3-month hold
+TIME_EXIT_DAYS = 0               # >0 = cut a name that hasn't recovered pre-drop by day N
+
+
+def has_director_buy(director_buy) -> bool:
+    return director_buy is True or str(director_buy).strip().lower() == "true"
+
+
 def is_quality(npat_margin, fcf_margin) -> bool:
     """Profitability gate. None (fundamentals missing) fails CLOSED — if we can't
     prove a name isn't deeply loss-making, we don't trade it. Returns True only when

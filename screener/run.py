@@ -30,6 +30,7 @@ from . import config as cfg
 from . import data as datamod
 from . import state as statemod
 from . import ledger as ledgermod
+from . import us_insiders
 from .stats import evaluate_series
 
 
@@ -182,6 +183,36 @@ def main():
                 f"all {len(favoured_new)} favoured UNGATED. Attach npat_margin/fcf_margin.")
     else:
         log(f"quality gate OFF — alerting all {len(favoured_new)} favoured")
+
+    # Structural-trigger hard filter (8-K study): drop names whose fall was caused by a
+    # lost contract / impairment / distress event — those don't mean-revert. Fails OPEN:
+    # only a positively-identified structural 8-K excludes a name; 'none'/other are kept.
+    if cfg.EXCLUDE_STRUCTURAL_TRIGGERS and favoured_new:
+        us_fav = [d for d in favoured_new if d.get("market") == "US"]
+        if us_fav:
+            try:
+                import requests
+                from . import sec_triggers as stg
+                us_insiders._load_cik_map()          # ensure CIK cache is populated
+                sess = requests.Session()
+                kept = []
+                for d in favoured_new:
+                    if d.get("market") != "US":
+                        kept.append(d); continue
+                    cik = us_insiders._cik_for(str(d["ticker"]).split("_")[0].split("-")[0])
+                    rows = stg.fetch_8k_rows(cik, sess) if cik else []
+                    trig = stg.triggers_near(rows, d.get("event_date"))
+                    d["trigger_primary"] = trig["primary"]
+                    d["trigger_cats"] = trig["cats"]
+                    if cfg.is_bad_trigger(trig["primary"]):
+                        log(f"EXCLUDED {d['ticker']}: structural trigger '{trig['primary']}'")
+                    else:
+                        kept.append(d)
+                log(f"trigger-filtered (alerted): {len(kept)} of {len(favoured_new)} (dropped "
+                    f"{len(favoured_new)-len(kept)} structural)")
+                favoured_new = kept
+            except Exception as e:  # noqa: BLE001
+                log(f"trigger filter failed (keeping all): {e!r}")
 
     # Log EVERYTHING (with tags) to the running CSV; ALERT only favoured names.
     statemod.append_candidates(all_csv, new_rows)

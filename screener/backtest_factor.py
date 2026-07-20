@@ -221,6 +221,68 @@ STOPS = (5, 8, 10, 12, 25, 30)  # hard stop-loss levels (% below entry), fixed-3
                                 # but cap the true blow-up / delisting tail — the survivorship
                                 # insurance without killing the return.
 
+TIME_EXIT_GRID = (15, 21, 30, 42)  # candidate non-recovery time-stops (trading days) to sweep
+
+
+def confirmed_exits(close, bench, entry_pos, pre, grid=TIME_EXIT_GRID):
+    """Exit variants anchored at the CONFIRMED entry (not the signal close), so the
+    numbers match the model we actually trade. Returns, per event:
+      ce_trail        — ride a trailing stop once the price recovers to its pre-drop
+                        level (time-stop at 3m if it never recovers). No early cut.
+      ce_te{N}        — the recovery TIME-EXIT: if the name reclaims its pre-drop price
+                        within N days of entry, ride the trailing stop; else cut it at
+                        day N. This is the 'don't wait forever for a bounce' rule.
+    Each has a matching _exc (excess vs benchmark over the realised hold)."""
+    close = close.dropna().sort_index()
+    n = len(close); p = int(entry_pos)
+    if p < 0 or p + 1 >= n:
+        return {}
+    e = float(close.iloc[p])
+    if e <= 0:
+        return {}
+    end = min(p + EXIT_MAX, n - 1)
+    b0 = float(bench.iloc[p]) if p < len(bench) else 0.0
+
+    def bexc(exit_pos, r):
+        if exit_pos is None or exit_pos >= n or b0 <= 0:
+            return None
+        b = float(bench.iloc[exit_pos]) / b0 - 1
+        return round(r - b, 4)
+
+    def trail_from(rec_day):
+        seg = close.iloc[rec_day:end + 1]
+        peak = float(seg.iloc[0]); exitp = float(seg.iloc[-1]); hold = len(seg) - 1
+        for k in range(1, len(seg)):
+            c = float(seg.iloc[k]); peak = max(peak, c)
+            if c < peak * (1 - TRAIL):
+                exitp = c; hold = k; break
+        return exitp / e - 1, rec_day + hold
+
+    # first day the pre-drop price is reclaimed, within the 3-month recovery window
+    rec_end = min(p + RECOVER_TIMESTOP, n - 1)
+    rec = None
+    for j in range(p + 1, rec_end + 1):
+        if float(close.iloc[j]) >= pre:
+            rec = j; break
+
+    out = {}
+    if rec is not None:
+        r, xp = trail_from(rec)
+    else:
+        xp = rec_end; r = float(close.iloc[xp]) / e - 1
+    out["ce_trail"] = round(r, 4); out["ce_trail_exc"] = bexc(xp, r)
+
+    for N in grid:
+        npos = min(p + N, n - 1)
+        if rec is not None and (rec - p) <= N:
+            r, xp = trail_from(rec)                 # bounced in time -> ride it
+        else:
+            xp = npos; r = float(close.iloc[xp]) / e - 1   # no bounce by day N -> cut
+        out[f"ce_te{N}"] = round(r, 4); out[f"ce_te{N}_exc"] = bexc(xp, r)
+
+    out["ce_rec_days"] = (rec - p) if rec is not None else -1
+    return out
+
 
 def exit_rules(close, ev):
     """Path-dependent exits, entering at the signal-day close (position i).
@@ -329,6 +391,15 @@ def _quality_mask(df):
     return (npat >= cfg.NPAT_MARGIN_MIN) & (fcf >= cfg.FCF_MARGIN_MIN)
 
 
+def _trigger_mask(df):
+    """Exclude structural-repricing triggers when the events are tagged (trigger_primary
+    present). Fails OPEN: 'none'/untagged rows pass — only positively-identified
+    structural drops are dropped. When the column is absent, pass all."""
+    if not cfg.EXCLUDE_STRUCTURAL_TRIGGERS or "trigger_primary" not in df.columns:
+        return pd.Series(True, index=df.index)
+    return ~df["trigger_primary"].isin(cfg.STRUCTURAL_TRIGGERS)
+
+
 # ---- insider (SEC Form 4) signal summary — US only ------------------------
 
 def insider_summary(df):
@@ -377,7 +448,7 @@ def by_horizon_summary(df):
     if "year" not in df.columns or "sector" not in df.columns:
         return {}
     fav = df[df["sector"].map(_fav) & (df["raw"] <= cfg.ABS_DROP_THRESHOLD)
-             & df["fwd_3m"].notna() & _quality_mask(df)]
+             & df["fwd_3m"].notna() & _quality_mask(df) & _trigger_mask(df)]
     if len(fav) == 0:
         return {}
     ymax = int(fav["year"].max())
@@ -878,12 +949,18 @@ def run_eodhd(years, data_dir, limit=0, exchanges=("NYSE",)):
             fm = forward_and_momentum(px["Close"], bench, ev)
             et = entry_timing_fields(px["Close"], px["Volume"], bench, ev)
             xr = exit_rules(px["Close"], ev)
+            # confirmed-entry-anchored exits (trailing stop + non-recovery time-exit grid)
+            cex = {}
+            epos = find_entry(px["Close"], px["Volume"], ev["pos"], "confirmed")
+            iw = ev["pos"] - ev["window_len"]
+            if epos is not None and iw >= 0:
+                cex = confirmed_exits(px["Close"], bench, epos, float(px["Close"].iloc[iw]))
             mm = metrics_for_event(fund, ev["date"], ev["entry"], "US") if fund else {}
             ins = insider_map.get((code, ev["date"]), {})
             rows.append({"market": "US", "ticker": code, "name": name_by.get(code, code),
                          "sector": sec, "exchange": "US-SF", "date": ev["date"],
                          "year": int(ev["date"][:4]), "window_len": ev["window_len"],
-                         "raw": ev["raw"], "z": ev["z"], **fm, **et, **xr, **mm, **ins})
+                         "raw": ev["raw"], "z": ev["z"], **fm, **et, **xr, **cex, **mm, **ins})
         if (j + 1) % 1000 == 0:
             log(f"fundamentals {j+1}/{len(evmap)}")
     _finalise(rows, data_dir, source="eodhd")

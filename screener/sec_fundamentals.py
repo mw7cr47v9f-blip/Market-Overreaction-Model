@@ -75,6 +75,7 @@ def margins_for_tickers(tickers, session=None) -> dict:
     """{ticker -> {npat_margin, fcf_margin}} via SEC companyfacts. Network; live path."""
     import requests
     sess = session or requests
+    us_insiders._load_cik_map()          # REQUIRED: _cik_for reads this cache, doesn't fill it
     out = {}
     for t in tickers:
         cik = us_insiders._cik_for(t)

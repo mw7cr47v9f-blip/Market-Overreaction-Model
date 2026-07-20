@@ -119,4 +119,35 @@ ok("profitable name accepted", cfg.is_quality(0.08, 0.05) is True)
 ok("missing fundamentals fail closed", cfg.is_quality(None, 0.05) is False)
 ok("break-even accepted at the floor", cfg.is_quality(-0.05, 0.0) is True)
 
+print("Structural-trigger hard filter:")
+ok("contract_loss is a bad trigger", cfg.is_bad_trigger("contract_loss") is True)
+ok("cost_impair is a bad trigger", cfg.is_bad_trigger("cost_impair") is True)
+ok("distress is a bad trigger", cfg.is_bad_trigger("distress") is True)
+ok("earnings is NOT a bad trigger", cfg.is_bad_trigger("earnings") is False)
+ok("none is NOT a bad trigger (fail open)", cfg.is_bad_trigger("none") is False)
+from screener.backtest_factor import _trigger_mask
+_td = pd.DataFrame({"trigger_primary": ["earnings", "distress", "none", "cost_impair"]})
+ok("trigger mask keeps earnings/none, drops structural",
+   list(_trigger_mask(_td)) == [True, False, True, False])
+ok("trigger mask passes all when column absent",
+   _trigger_mask(pd.DataFrame({"x": [1, 2]})).all())
+
+print("Confirmed-entry exits (trailing stop + non-recovery time exit):")
+from screener.backtest_factor import confirmed_exits
+# entry at index 10 (price 10); pre-drop target = 12; recovers to 12 on day 10+8=18, then rises
+cx = np.full(60, 10.0)
+for k in range(11, 18): cx[k] = 10 + (k-10)*0.25      # climbs toward 12
+cx[18:] = 12.6                                          # reclaims pre-drop (12) at day 18, holds
+cxs = pd.Series(cx, index=dates(60))
+bflat = pd.Series(np.full(60, 100.0), index=dates(60))
+ce = confirmed_exits(cxs, bflat, 10, 12.0)
+ok("recovery measured from entry (~8 days)", ce["ce_rec_days"] == 8)
+ok("time-exit with N>=rec rides the winner (positive)", ce["ce_te30"] > 0)
+# a name that NEVER recovers to pre-drop -> time-exit cuts it at day N at a loss
+cx2 = np.full(60, 10.0); cx2[11:] = 8.0                # drops after entry, never reaches 12
+ce2 = confirmed_exits(pd.Series(cx2, index=dates(60)), bflat, 10, 12.0)
+ok("non-recoverer flagged (rec_days = -1)", ce2["ce_rec_days"] == -1)
+ok("time-exit cuts non-recoverer at a loss", ce2["ce_te21"] < 0)
+ok("director-buy helper reads booleans", cfg.has_director_buy(True) is True and cfg.has_director_buy(False) is False)
+
 print(f"\nALL {passed} FACTOR ASSERTIONS PASSED")
