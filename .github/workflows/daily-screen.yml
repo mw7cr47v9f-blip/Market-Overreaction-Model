@@ -6,7 +6,10 @@ name: ASX overreaction daily screen
 # follow daylight saving; 08:00 UTC stays after the close year-round.
 on:
   schedule:
-    - cron: "0 8 * * 1-5"
+    # 21:15 UTC weekdays = ~15 min after the US winter close (4pm ET) / ~75 min
+    # after the summer close. The analysis task then runs at 21:45 UTC (= 5:45am
+    # Perth, year-round) so the email is waiting when Keegan wakes.
+    - cron: "15 21 * * 1-5"
   workflow_dispatch: {}   # lets you run it by hand from the Actions tab
 
 permissions:
