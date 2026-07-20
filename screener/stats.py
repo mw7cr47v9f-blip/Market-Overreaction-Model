@@ -134,7 +134,8 @@ def evaluate_series(
         cond1 = z <= cfg.Z_THRESHOLD
         cond2 = index_rel <= cfg.INDEX_REL_THRESHOLD
         cond3 = r <= cfg.ABS_DROP_THRESHOLD
-        if cond1 and cond2 and cond3:
+        cond4 = r >= cfg.MAX_DROP_FLOOR      # not a solvency-event / delisting crater
+        if cond1 and cond2 and cond3 and cond4:
             # worst single day inside the window -> event anchor
             win_rets = rets.iloc[i_win_start + 1: i_end + 1]
             event_date = win_rets.idxmin() if len(win_rets) else close.index[i_win_start + 1]

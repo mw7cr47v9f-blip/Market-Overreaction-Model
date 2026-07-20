@@ -16,6 +16,12 @@ INDEX_REL_THRESHOLD = -0.10  # underperform benchmark by >= 10pp
 ABS_DROP_THRESHOLD = -0.15   # raw decline >= 15% (tightened from 10%: backtest showed
                              # the edge is concentrated in deeper drops — 10-15% falls
                              # barely beat the market, 15-30% falls win ~65-70%)
+MAX_DROP_FLOOR = -0.60       # ignore drops WORSE than this. A >60% fall in <=5 days is
+                             # a solvency event / delisting / data discontinuity, not an
+                             # overreaction to bad news. The survivorship-free backtest
+                             # showed these near-100% "drops" both destroy the return
+                             # maths (near-zero entry -> Infinity fwd return) and are
+                             # untradeable. Applies to live screen AND backtest.
 WINDOW_LENGTHS = [1, 2, 3, 4, 5]
 VOL_LOOKBACK = 90            # trailing trading days for the volatility baseline
 MIN_VOL_OBS = 40            # min trailing returns to trust the vol estimate
@@ -33,6 +39,17 @@ FAVOURED_SECTORS_RE = (r"\btechnology|software|semiconductor|"
 AVOID_SECTORS_RE = r"material|pharma|biotech|telecom|real estate"
 HOLD_MONTHS = 3             # locked time-based exit; no price stop-loss
 
+# ---- Profitability gate (added from the survivorship-free factor study) ------
+# The clean 2012-2026 NYSE backtest showed the bottom third by NPAT margin AND by
+# FCF margin (the deeply loss-making, cash-burning names) had ~50% hit / ~0 excess
+# — dead weight. Excluding them lifts the model's hit rate ~58.6% -> ~64.4% and,
+# crucially, makes the edge hold up in calm markets (2022-26 excess +0.3% -> +2.8%).
+# Thresholds are the ~33rd-percentile cutoffs, rounded: reject clearly unprofitable
+# names, keep break-even-or-better. Set REQUIRE_QUALITY=False to disable the gate.
+REQUIRE_QUALITY = True
+NPAT_MARGIN_MIN = -0.05     # net profit margin floor (bottom-tercile cut ~ -6%)
+FCF_MARGIN_MIN = 0.0        # free-cash-flow margin floor (bottom-tercile cut ~ -1%)
+
 
 def is_favoured(sector) -> bool:
     return bool(_re.search(FAVOURED_SECTORS_RE, str(sector).lower()))
@@ -40,6 +57,18 @@ def is_favoured(sector) -> bool:
 
 def is_avoided(sector) -> bool:
     return bool(_re.search(AVOID_SECTORS_RE, str(sector).lower()))
+
+
+def is_quality(npat_margin, fcf_margin) -> bool:
+    """Profitability gate. None (fundamentals missing) fails CLOSED — if we can't
+    prove a name isn't deeply loss-making, we don't trade it. Returns True only when
+    both margins are known and above their floors."""
+    if npat_margin is None or fcf_margin is None:
+        return False
+    try:
+        return float(npat_margin) >= NPAT_MARGIN_MIN and float(fcf_margin) >= FCF_MARGIN_MIN
+    except (TypeError, ValueError):
+        return False
 
 # ---- Per-market settings -------------------------------------------------
 
@@ -86,7 +115,7 @@ LARGE_CAP_CUTOFF = _m["large_cap_cutoff"]
 BENCHMARK_200 = _m["benchmark_large"]
 BENCHMARK_300 = _m["benchmark_small"]
 
-_GLOBALS = ["Z_THRESHOLD", "INDEX_REL_THRESHOLD", "ABS_DROP_THRESHOLD",
+_GLOBALS = ["Z_THRESHOLD", "INDEX_REL_THRESHOLD", "ABS_DROP_THRESHOLD", "MAX_DROP_FLOOR",
             "WINDOW_LENGTHS", "VOL_LOOKBACK", "MIN_VOL_OBS", "HISTORY_CALENDAR_DAYS"]
 
 

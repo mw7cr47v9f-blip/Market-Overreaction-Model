@@ -77,7 +77,7 @@ def detect_events(close, volume, bench, mcfg, cooldown=COOLDOWN):
         base_vol = vol.shift(w)                      # volatility strictly before the window
         z = wret / (base_vol * math.sqrt(w))
         idxrel = wret - (bench / bench.shift(w) - 1)
-        cond = ((z <= cfg.Z_THRESHOLD) & (wret <= BT_DROP_FLOOR) &
+        cond = ((z <= cfg.Z_THRESHOLD) & (wret <= BT_DROP_FLOOR) & (wret >= cfg.MAX_DROP_FLOOR) &
                 (idxrel <= cfg.INDEX_REL_THRESHOLD) & (adv >= mcfg.MIN_AVG_DAILY_VALUE))
         upd = cond & (z < best_z)
         best_z = best_z.where(~upd, z)
@@ -103,11 +103,13 @@ def forward_and_momentum(close, bench, ev):
     bench = bench.reindex(close.index).ffill()
     i, w, n = ev["pos"], ev["window_len"], len(close)
     out = {}
+    entry_px = float(close.iloc[i])
     for tag, H in (("3m", H3), ("6m", H6)):
         j = i + H
-        if j < n:
-            fwd = close.iloc[j] / close.iloc[i] - 1
-            bfwd = bench.iloc[j] / bench.iloc[i] - 1
+        b0 = float(bench.iloc[i]) if j < n else 0.0
+        if j < n and entry_px > 0 and b0 > 0:      # guard: near-zero entry -> Inf return
+            fwd = close.iloc[j] / entry_px - 1
+            bfwd = bench.iloc[j] / b0 - 1
             out[f"fwd_{tag}"] = round(float(fwd), 4)
             out[f"excess_{tag}"] = round(float(fwd - bfwd), 4)
         else:
@@ -316,6 +318,17 @@ def _avoid(s):
     return cfg.is_avoided(s)
 
 
+def _quality_mask(df):
+    """Row mask for the profitability gate. When cfg.REQUIRE_QUALITY, keep only events
+    whose NPAT and FCF margins clear the floors; missing fundamentals (NaN) fail closed.
+    When the columns are absent (e.g. yfinance runs with no fundamentals), pass all."""
+    if not cfg.REQUIRE_QUALITY or "npat_margin" not in df.columns or "fcf_margin" not in df.columns:
+        return pd.Series(True, index=df.index)
+    npat = pd.to_numeric(df["npat_margin"], errors="coerce")
+    fcf = pd.to_numeric(df["fcf_margin"], errors="coerce")
+    return (npat >= cfg.NPAT_MARGIN_MIN) & (fcf >= cfg.FCF_MARGIN_MIN)
+
+
 # ---- insider (SEC Form 4) signal summary — US only ------------------------
 
 def insider_summary(df):
@@ -363,16 +376,18 @@ def by_horizon_summary(df):
     a one-off crisis effect. ONLY meaningful on a survivorship-free universe."""
     if "year" not in df.columns or "sector" not in df.columns:
         return {}
-    fav = df[df["sector"].map(_fav) & (df["raw"] <= cfg.ABS_DROP_THRESHOLD) & df["fwd_3m"].notna()]
+    fav = df[df["sector"].map(_fav) & (df["raw"] <= cfg.ABS_DROP_THRESHOLD)
+             & df["fwd_3m"].notna() & _quality_mask(df)]
     if len(fav) == 0:
         return {}
     ymax = int(fav["year"].max())
     ann = lambda r: (1 + r) ** 4 - 1  # noqa: E731
-    out = {}
+    out = {"quality_gate": bool(cfg.REQUIRE_QUALITY)}
     for h in (5, 10, 15):
         sub = fav[fav["year"] >= ymax - h + 1]
         if len(sub) >= 20:
-            m = float(sub["fwd_3m"].mean()); idx = float((sub["fwd_3m"] - sub["excess_3m"]).mean())
+            m = float(_winsorise(sub["fwd_3m"]).mean())
+            idx = float(_winsorise(sub["fwd_3m"] - sub["excess_3m"]).mean())
             out[f"{h}y"] = {"n": int(len(sub)), "window": f"{ymax-h+1}-{ymax}",
                             "strat_ann": round(ann(m), 4), "mkt_ann": round(ann(idx), 4),
                             "excess_ann": round(ann(m) - ann(idx), 4),
@@ -645,15 +660,27 @@ def summarise(df):
     return out
 
 
+def _winsorise(s, lo=1, hi=99):
+    """Clip to [1,99] pct so a few relist/discontinuity artifacts can't dominate a
+    mean. Robust to a survivorship-free universe where dead names produce fat tails."""
+    s = s.replace([np.inf, -np.inf], np.nan).dropna()
+    if len(s) < 20:
+        return s
+    a, b = np.nanpercentile(s, [lo, hi])
+    return s.clip(a, b)
+
+
 def _stat(df, col, ex):
-    s = df[col].dropna()
+    s = df[col].replace([np.inf, -np.inf], np.nan).dropna()
     if len(s) == 0:
         return {"n": 0}
-    e = df[ex].dropna()
-    return {"n": int(len(s)), "mean": round(float(s.mean()), 4), "median": round(float(s.median()), 4),
-            "hit_rate": round(float((s > 0).mean()), 3), "std": round(float(s.std()), 4),
-            "mean_excess": round(float(e.mean()), 4) if len(e) else None,
-            "ir_like": round(float(s.mean() / s.std()), 3) if s.std() else None}
+    e = df[ex].replace([np.inf, -np.inf], np.nan).dropna()
+    sw = _winsorise(s)                     # winsorised mean/std; hit-rate & median stay raw
+    ew = _winsorise(e)
+    return {"n": int(len(s)), "mean": round(float(sw.mean()), 4), "median": round(float(s.median()), 4),
+            "hit_rate": round(float((s > 0).mean()), 3), "std": round(float(sw.std()), 4),
+            "mean_excess": round(float(ew.mean()), 4) if len(ew) else None,
+            "ir_like": round(float(sw.mean() / sw.std()), 3) if sw.std() else None}
 
 
 # ---- orchestration --------------------------------------------------------

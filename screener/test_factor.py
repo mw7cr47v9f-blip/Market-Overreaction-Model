@@ -97,4 +97,26 @@ ok("fcf_margin = latest fcf/rev", _m["fcf_margin"] == round(120/1200, 4))
 ok("rev_growth CAGR", _m["rev_growth"] == round(1200/1000 - 1, 4))
 ok("eps_growth CAGR", _m["eps_growth"] == round(1.5/1.0 - 1, 4))
 
+print("Max-drop floor (solvency-event guard):")
+c2 = close.copy(); v2 = vol.copy()
+c2.iloc[300] = c2.iloc[299] * 0.25                 # -75% crater in one day
+crater = detect_events(c2, v2, bench, mcfg)
+ok("no event on a -75% crater (below MAX_DROP_FLOOR)",
+   not any(298 <= e["pos"] <= 302 for e in crater))
+ok("MAX_DROP_FLOOR propagates to market params", mcfg.MAX_DROP_FLOOR == cfg.MAX_DROP_FLOOR)
+
+print("Zero-price guard (no Infinity forward returns):")
+c3 = close.copy()
+c3.iloc[200] = 0.0                                  # entry price collapses to zero
+fm0 = forward_and_momentum(c3, bench, {"pos": 200, "window_len": 1})
+ok("zero entry -> fwd_3m is None, not Inf", fm0["fwd_3m"] is None)
+ok("zero entry -> excess_3m is None", fm0["excess_3m"] is None)
+
+print("Profitability gate:")
+ok("loss-maker rejected (npat<-5%)", cfg.is_quality(-0.20, 0.10) is False)
+ok("cash-burner rejected (fcf<0)", cfg.is_quality(0.10, -0.05) is False)
+ok("profitable name accepted", cfg.is_quality(0.08, 0.05) is True)
+ok("missing fundamentals fail closed", cfg.is_quality(None, 0.05) is False)
+ok("break-even accepted at the floor", cfg.is_quality(-0.05, 0.0) is True)
+
 print(f"\nALL {passed} FACTOR ASSERTIONS PASSED")

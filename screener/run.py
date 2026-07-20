@@ -97,6 +97,8 @@ def main():
         from . import test_stats     # noqa: F401  (runs assertions on import)
         from . import test_ledger    # noqa: F401
         from . import test_universe  # noqa: F401
+        from . import test_factor    # noqa: F401  (gate + guards)
+        from . import test_sec       # noqa: F401  (live fundamentals)
         return
 
     os.makedirs(args.data_dir, exist_ok=True)
@@ -143,7 +145,43 @@ def main():
         d["avoided"] = cfg.is_avoided(sec)
         new_rows.append(d)
     favoured_new = [d for d in new_rows if d["favoured"]]
-    log(f"favoured-sector (alerted): {len(favoured_new)} of {len(new_rows)} new")
+    log(f"favoured-sector: {len(favoured_new)} of {len(new_rows)} new")
+
+    # Profitability gate (survivorship-free factor study): only alert names that are
+    # not deeply loss-making. Needs npat_margin + fcf_margin attached per candidate.
+    # Fails CLOSED — a name whose fundamentals we can't confirm is NOT alerted.
+    if cfg.REQUIRE_QUALITY and favoured_new:
+        # Attach point-in-time-ish margins from SEC companyfacts (free) for US names,
+        # so the profitability gate can act. Only the day's favoured candidates -> few calls.
+        us_fav = [d for d in favoured_new if d.get("market") == "US"]
+        if us_fav:
+            try:
+                from . import sec_fundamentals as secf
+                margins = secf.margins_for_tickers([d["ticker"] for d in us_fav])
+                for d in us_fav:
+                    mm = margins.get(d["ticker"], {})
+                    d["npat_margin"] = mm.get("npat_margin")
+                    d["fcf_margin"] = mm.get("fcf_margin")
+            except Exception as e:  # noqa: BLE001
+                log(f"SEC fundamentals fetch failed: {e!r}")
+
+    if cfg.REQUIRE_QUALITY:
+        fundamentals_seen = any(("npat_margin" in d) for d in favoured_new)
+        if fundamentals_seen:
+            # A fundamentals source is wired: gate per-name, failing CLOSED on any
+            # name whose margins we can't confirm above the floors.
+            for d in favoured_new:
+                d["quality_ok"] = cfg.is_quality(d.get("npat_margin"), d.get("fcf_margin"))
+            gated = [d for d in favoured_new if d["quality_ok"]]
+            log(f"quality-gated (alerted): {len(gated)} of {len(favoured_new)} favoured")
+            favoured_new = gated
+        elif favoured_new:
+            # No fundamentals source yet: don't go dark — pass favoured through but
+            # flag loudly that the profitability gate is inactive pending a data feed.
+            log("WARNING: quality gate ON but NO fundamentals source wired — alerting "
+                f"all {len(favoured_new)} favoured UNGATED. Attach npat_margin/fcf_margin.")
+    else:
+        log(f"quality gate OFF — alerting all {len(favoured_new)} favoured")
 
     # Log EVERYTHING (with tags) to the running CSV; ALERT only favoured names.
     statemod.append_candidates(all_csv, new_rows)
