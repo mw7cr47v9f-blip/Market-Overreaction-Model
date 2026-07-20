@@ -26,6 +26,7 @@ import pandas as pd
 from . import config as cfg
 from . import data as datamod
 from . import us_insiders
+from . import eodhd
 
 H3, H6 = 63, 126           # ~3 and ~6 trading months
 COOLDOWN = 21              # trading days between distinct events for one name
@@ -171,7 +172,8 @@ def entry_summary(df):
     out = {}
     for rule in ("up1", "confirmed"):
         cflag = f"{rule}_conf"
-        if cflag not in df.columns:
+        if cflag not in df.columns or f"{rule}_fwd6m" not in df.columns:
+            # No event ever confirmed this entry rule (column never created).
             continue
         conf = df[(df[cflag] == True) & df[f"{rule}_fwd6m"].notna()]  # noqa: E712
         skipped = df[(df[cflag] == False) & df["fwd_6m"].notna()]  # noqa: E712
@@ -339,6 +341,29 @@ def insider_summary(df):
     return out
 
 
+def by_horizon_summary(df):
+    """Trailing 5 / 10 / 15-year annualised return of the favoured+floor cohort vs
+    the market — to test whether the edge is consistent across regimes rather than
+    a one-off crisis effect. ONLY meaningful on a survivorship-free universe."""
+    if "year" not in df.columns or "sector" not in df.columns:
+        return {}
+    fav = df[df["sector"].map(_fav) & (df["raw"] <= cfg.ABS_DROP_THRESHOLD) & df["fwd_3m"].notna()]
+    if len(fav) == 0:
+        return {}
+    ymax = int(fav["year"].max())
+    ann = lambda r: (1 + r) ** 4 - 1  # noqa: E731
+    out = {}
+    for h in (5, 10, 15):
+        sub = fav[fav["year"] >= ymax - h + 1]
+        if len(sub) >= 20:
+            m = float(sub["fwd_3m"].mean()); idx = float((sub["fwd_3m"] - sub["excess_3m"]).mean())
+            out[f"{h}y"] = {"n": int(len(sub)), "window": f"{ymax-h+1}-{ymax}",
+                            "strat_ann": round(ann(m), 4), "mkt_ann": round(ann(idx), 4),
+                            "excess_ann": round(ann(m) - ann(idx), 4),
+                            "hit": round(float((sub["fwd_3m"] > 0).mean()), 3)}
+    return out
+
+
 def by_year_summary(df):
     """Forward-return distribution by the event's calendar year (needs >=10/yr).
     Lets us report per-year and 5-year-average returns once the run completes."""
@@ -431,47 +456,79 @@ def ticker_fundamentals(yft):
             "sector": sector, "dividends": divs}
 
 
+def _as_iso(x):
+    if x is None:
+        return None
+    try:
+        return pd.Timestamp(x).date().isoformat()
+    except Exception:  # noqa: BLE001
+        s = str(x)[:10]
+        return s if len(s) == 10 else None
+
+
+def _pos(x):
+    return x is not None and x == x and x != 0
+
+
 def metrics_for_event(fund, entry_date, entry_price, market):
-    """Compute profitability/ROE/DE/earnings-yield-spread as-of the event."""
-    if not fund or not fund["fy"]:
+    """Profitability / ROE / DE / earnings-yield + the five quality factors, taken
+    POINT-IN-TIME: the latest fiscal year whose FILING date is on/before the event
+    (EODHD supplies filing_date; yfinance falls back to the fiscal-period date)."""
+    if not fund or not fund.get("fy"):
         return {}
-    ed = pd.Timestamp(entry_date)
-    prior = [r for r in fund["fy"] if r["date"] <= ed]
+    ed_iso = _as_iso(entry_date)
+
+    def known(r):                      # date the statement became public
+        return _as_iso(r.get("filing_date") or r.get("date"))
+    prior = [r for r in fund["fy"] if known(r) and ed_iso and known(r) <= ed_iso]
     fy = prior[-1] if prior else fund["fy"][0]
-    ni, eq, debt = fy["ni"], fy["eq"], fy["debt"]
-    m = {"profitable": bool(ni > 0) if ni == ni else None,
-         "roe": round(ni / eq, 4) if (eq and eq == eq and eq != 0) else None,
-         "de": round(debt / eq, 4) if (eq and eq == eq and eq != 0) else None}
-    # earnings yield vs bond yield (uses a single shares-outstanding figure)
+    ni, eq, debt = fy.get("ni"), fy.get("eq"), fy.get("debt")
+    m = {"profitable": (bool(ni > 0) if ni is not None else None),
+         "roe": round(ni / eq, 4) if (ni is not None and _pos(eq)) else None,
+         "de": round(debt / eq, 4) if (debt is not None and _pos(eq)) else None}
     shares_out = fund.get("shares_out")
-    if shares_out and entry_price:
+    if shares_out and entry_price and ni is not None:
         ey = ni / (shares_out * entry_price)
         bond = AU_BOND_YIELD if market == "ASX" else metrics_for_event._us_bond.get(entry_date, 0.043)
         m["earnings_yield"] = round(ey, 4)
         m["ey_minus_bond"] = round(ey - bond, 4)
 
-    # ---- the five quality factors under test (all as-of the event, indicative) ----
+    # ---- the five quality factors under test (point-in-time) ----
     rev, fcf = fy.get("rev"), fy.get("fcf")
-    if rev and rev == rev and rev != 0:
-        m["npat_margin"] = round(ni / rev, 4)                       # profit margin
-        if fcf == fcf and fcf is not None:
+    if _pos(rev):
+        if ni is not None:
+            m["npat_margin"] = round(ni / rev, 4)                   # profit margin
+        if fcf is not None:
             m["fcf_margin"] = round(fcf / rev, 4)                   # free-cash-flow margin
-    # revenue & EPS growth (CAGR across the prior fiscal years available, ~4y deep on yfinance)
-    m["rev_growth"] = _cagr([r.get("rev") for r in prior])
-    m["eps_growth"] = _cagr([r.get("eps") for r in prior])
-    # trailing-12-month dividend yield as-of entry
-    divs = fund.get("dividends")
-    if divs is not None and entry_price and len(divs):
-        try:
-            idx = divs.index
-            lo = ed.tz_localize(idx.tz) - pd.Timedelta(days=365) if getattr(idx, "tz", None) else ed - pd.Timedelta(days=365)
-            hi = ed.tz_localize(idx.tz) if getattr(idx, "tz", None) else ed
-            ttm = float(divs[(idx > lo) & (idx <= hi)].sum())
-            m["div_yield"] = round(ttm / entry_price, 4)
-        except Exception:  # noqa: BLE001
-            pass
+    # growth over the last ~5 filed fiscal years (6 points = 5-year CAGR)
+    m["rev_growth"] = _cagr([r.get("rev") for r in prior[-6:]])
+    m["eps_growth"] = _cagr([r.get("eps") for r in prior[-6:]])
+    dy = _ttm_div_yield(fund.get("dividends"), ed_iso, entry_price)
+    if dy is not None:
+        m["div_yield"] = dy
     return m
 metrics_for_event._us_bond = {}
+
+
+def _ttm_div_yield(divs, ed_iso, price):
+    """Trailing-12-month dividend / price. Accepts EODHD's [(iso_date, value)] or a
+    yfinance pandas Series. None if no dividend history at all."""
+    if divs is None or not price or ed_iso is None or (hasattr(divs, "__len__") and len(divs) == 0):
+        return None
+    lo_iso = (pd.Timestamp(ed_iso) - pd.Timedelta(days=365)).date().isoformat()
+    try:
+        if isinstance(divs, list):                                 # [(iso_date, value)] (EODHD)
+            ttm = sum(v for d, v in divs if lo_iso < str(d)[:10] <= ed_iso)
+        else:                                                      # pandas Series (yfinance)
+            idx = divs.index
+            tz = getattr(idx, "tz", None)
+            lo = pd.Timestamp(lo_iso); hi = pd.Timestamp(ed_iso)
+            if tz is not None:
+                lo, hi = lo.tz_localize(tz), hi.tz_localize(tz)
+            ttm = float(divs[(idx > lo) & (idx <= hi)].sum())
+        return round(ttm / price, 4)
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _cagr(vals):
@@ -626,10 +683,14 @@ def run(markets, years, data_dir, limit=0):
             except Exception as e:  # noqa: BLE001
                 log(f"insider signal fetch failed: {e!r}")
         # Stage 2: fundamentals only for names with events
+        use_eodhd = bool(eodhd.token())
+        if use_eodhd:
+            log(f"{name}: fundamentals via EODHD (point-in-time)")
         for y, evs in evmap.items():
             fund = None
             try:
-                fund = ticker_fundamentals(y)
+                fund = (eodhd.fundamentals(code_by.get(y, y), name) if use_eodhd
+                        else ticker_fundamentals(y))
             except Exception:  # noqa: BLE001
                 fund = None
             df = prices[y]
@@ -646,6 +707,10 @@ def run(markets, years, data_dir, limit=0):
                              "date": ev["date"], "year": int(ev["date"][:4]),
                              "window_len": ev["window_len"], "raw": ev["raw"],
                              "z": ev["z"], **fm, **et, **xr, **mm, **ins})
+    _finalise(rows, data_dir, source="yfinance")
+
+
+def _finalise(rows, data_dir, source="yfinance"):
     df = pd.DataFrame(rows)
     os.makedirs(data_dir, exist_ok=True)
     df.to_csv(os.path.join(data_dir, "backtest_events.csv"), index=False)
@@ -654,6 +719,7 @@ def run(markets, years, data_dir, limit=0):
         summary["entry_timing"] = entry_summary(df)
         summary["exit_rules"] = exit_summary(df)
         summary["by_year"] = by_year_summary(df)
+        summary["by_horizon"] = by_horizon_summary(df)
         summary["insider"] = insider_summary(df)
         if "sector" in df.columns and df["sector"].notna().any():
             summary["exit_rules_excl_avoided"] = exit_summary(df[~df["sector"].map(_avoid)])
@@ -661,15 +727,108 @@ def run(markets, years, data_dir, limit=0):
             fav = df[df["sector"].map(_fav)]
             if "insider_signal" in fav.columns and fav["insider_signal"].notna().any():
                 summary["insider_favoured"] = insider_summary(fav)
-    summary["caveats"] = ["Universe = today's membership; delisted excluded (survivorship bias).",
-                          "Fundamentals: yfinance, survivor-only & as-restated, ~4y deep — INDICATIVE, not point-in-time.",
-                          "AU 10y bond yield is a fixed proxy (%.1f%%)." % (AU_BOND_YIELD*100),
-                          "Insider signal = SEC Form 4 (US only, point-in-time by filing date). "
-                          "ASX Appendix 3Y (director interests) needs a paid/archive feed — not yet wired."]
+    if source == "eodhd":
+        summary["caveats"] = [
+            "Universe = EODHD incl. DELISTED names — SURVIVORSHIP-FREE.",
+            "Fundamentals: EODHD, point-in-time by filing_date.",
+            "Prices: EODHD adjusted close (splits & dividends handled).",
+            "Insider = SEC Form 4 (US, point-in-time by filing date)."]
+    else:
+        summary["caveats"] = [
+            "Universe = today's membership; delisted EXCLUDED (survivorship bias).",
+            "Fundamentals: EODHD (point-in-time) if token set, else yfinance (flaky).",
+            "AU 10y bond yield is a fixed proxy (%.1f%%)." % (AU_BOND_YIELD * 100)]
     with open(os.path.join(data_dir, "backtest_summary.json"), "w") as f:
         json.dump(summary, f, indent=2)
     log(f"wrote {len(df)} events; summary saved")
-    print(json.dumps({k: summary[k] for k in ("n_events", "baseline_3m", "baseline_6m") if k in summary}, indent=2))
+    print(json.dumps({k: summary[k] for k in ("n_events", "baseline_3m", "by_horizon") if k in summary}, indent=2))
+
+
+def run_eodhd(years, data_dir, limit=0, exchanges=("NYSE",)):
+    """Survivorship-free US backtest: EODHD universe INCLUDING delisted names +
+    EODHD adjusted EOD prices, streamed one ticker at a time (bounded memory).
+    Fundamentals point-in-time (EODHD), insider from SEC Form 4, benchmarks from
+    yfinance indices (no survivorship issue)."""
+    import time
+    from datetime import date, timedelta
+    import requests
+    if not eodhd.token():
+        log("no EODHD_API_TOKEN — cannot run the survivorship-free path"); return
+    load_us_bond()
+    s = requests.Session()
+    end = date.today()
+    start = end - timedelta(days=int(years * 365) + 400)
+    start_s, end_s = start.isoformat(), end.isoformat()
+    mcfg = cfg.market_params("US")
+    uni = eodhd.universe("US", include_delisted=True, exchanges=exchanges, session=s)
+    if uni is None or len(uni) == 0:
+        log("no EODHD universe, aborting"); return
+    full_n = len(uni)
+    if limit:
+        uni = uni.head(limit)
+        log(f"PROBE MODE: processing {len(uni)} of {full_n} tickers to measure per-ticker cost")
+    benches = datamod.download_benchmarks(mcfg, period_days=int(years * 365) + 400)
+    bench = benches.get(mcfg.BENCHMARK_300)
+    if bench is None:
+        bench = benches.get(mcfg.BENCHMARK_200)
+    if bench is None:
+        log("no benchmark, aborting"); return
+    name_by = dict(zip(uni["code"], uni["name"]))
+    need = cfg.VOL_LOOKBACK + max(cfg.WINDOW_LENGTHS) + 5
+
+    # Pass 1 — stream every ticker (incl. delisted); keep prices only for names with events.
+    evmap, pxcache = {}, {}
+    codes = list(uni["code"])
+    t0 = time.time()
+    for i, code in enumerate(codes):
+        px = eodhd.eod_series(code, "US", start_s, end_s, session=s)
+        time.sleep(0.02)
+        if px is None or len(px) < need:
+            continue
+        evs = detect_events(px["Close"], px["Volume"], bench, mcfg)
+        if evs:
+            evmap[code] = evs
+            pxcache[code] = px
+        if (i + 1) % 1000 == 0:
+            per = (time.time() - t0) / (i + 1)
+            log(f"prices {i+1}/{len(codes)} — {len(evmap)} names with events "
+                f"({per*1000:.0f} ms/ticker, full-universe ETA {full_n*per/60:.0f} min)")
+    elapsed = time.time() - t0
+    per = elapsed / max(len(codes), 1)
+    log(f"Pass 1 done: {len(codes)} tickers in {elapsed/60:.1f} min "
+        f"({per*1000:.0f} ms/ticker). FULL-UNIVERSE ETA for Pass 1 = "
+        f"{full_n*per/60:.0f} min over {full_n} tickers.")
+    log(f"US survivorship-free: {sum(len(v) for v in evmap.values())} events across {len(evmap)} names")
+
+    insider_map = {}
+    try:
+        ev_by_tk = {code: [e["date"] for e in evs] for code, evs in evmap.items()}
+        insider_map = us_insiders.insider_signals_for_events(ev_by_tk, years=years)
+    except Exception as e:  # noqa: BLE001
+        log(f"insider fetch failed: {e!r}")
+
+    # Pass 2 — fundamentals (point-in-time) + all metrics per event.
+    rows = []
+    for j, (code, evs) in enumerate(evmap.items()):
+        px = pxcache[code]
+        try:
+            fund = eodhd.fundamentals(code, "US", session=s)
+        except Exception:  # noqa: BLE001
+            fund = None
+        sec = fund.get("sector") if fund else None
+        for ev in evs:
+            fm = forward_and_momentum(px["Close"], bench, ev)
+            et = entry_timing_fields(px["Close"], px["Volume"], bench, ev)
+            xr = exit_rules(px["Close"], ev)
+            mm = metrics_for_event(fund, ev["date"], ev["entry"], "US") if fund else {}
+            ins = insider_map.get((code, ev["date"]), {})
+            rows.append({"market": "US", "ticker": code, "name": name_by.get(code, code),
+                         "sector": sec, "exchange": "US-SF", "date": ev["date"],
+                         "year": int(ev["date"][:4]), "window_len": ev["window_len"],
+                         "raw": ev["raw"], "z": ev["z"], **fm, **et, **xr, **mm, **ins})
+        if (j + 1) % 1000 == 0:
+            log(f"fundamentals {j+1}/{len(evmap)}")
+    _finalise(rows, data_dir, source="eodhd")
 
 
 def main():
@@ -678,15 +837,26 @@ def main():
     ap.add_argument("--markets", default="")
     ap.add_argument("--data-dir", default="data")
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--source", default="yfinance", choices=["yfinance", "eodhd"],
+                    help="'eodhd' = survivorship-free US path (EODHD universe incl. delisted + prices)")
+    ap.add_argument("--exchanges", default="NYSE",
+                    help="eodhd path: canonical venue families to keep, comma-separated "
+                         "(NYSE / NASDAQ / AMEX / ARCA). Default NYSE. 'ALL' keeps everything.")
     ap.add_argument("--self-test", action="store_true")
     a = ap.parse_args()
     if a.self_test:
         from . import test_factor    # noqa: F401
         from . import test_insiders  # noqa: F401
         from . import test_universe  # noqa: F401
+        from . import test_eodhd     # noqa: F401
         return
-    markets = [m.strip() for m in a.markets.split(",") if m.strip()] or list(cfg.MARKETS)
-    run(markets, a.years, a.data_dir, a.limit)
+    if a.source == "eodhd":
+        exch = None if a.exchanges.strip().upper() == "ALL" else \
+            [x.strip().upper() for x in a.exchanges.split(",") if x.strip()]
+        run_eodhd(a.years, a.data_dir, a.limit, exchanges=exch)
+    else:
+        markets = [m.strip() for m in a.markets.split(",") if m.strip()] or list(cfg.MARKETS)
+        run(markets, a.years, a.data_dir, a.limit)
 
 
 if __name__ == "__main__":
