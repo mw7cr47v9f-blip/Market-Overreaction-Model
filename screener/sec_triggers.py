@@ -153,15 +153,25 @@ def enrich(events_csv, out_csv, limit=0):
     if limit:
         df = df.head(limit)
     sess = requests.Session()
+    us_insiders._load_cik_map()          # REQUIRED: _cik_for reads this cache, doesn't fill it
     tickers = [t for t in df["ticker"].dropna().unique()]
     log(f"tagging {len(df)} events across {len(tickers)} tickers")
     cache = {}
+    n_mapped = n_with_8k = 0
     for j, tk in enumerate(tickers):
         cik = us_insiders._cik_for(str(tk).split("_")[0].split("-")[0])  # strip _old / -WS suffixes
-        cache[tk] = fetch_8k_rows(cik, sess) if cik else []
+        if cik:
+            n_mapped += 1
+            rows = fetch_8k_rows(cik, sess)
+            cache[tk] = rows
+            if rows:
+                n_with_8k += 1
+        else:
+            cache[tk] = []
         time.sleep(0.05)
         if (j + 1) % 500 == 0:
-            log(f"fetched 8-K history {j+1}/{len(tickers)}")
+            log(f"fetched 8-K history {j+1}/{len(tickers)} — {n_mapped} mapped, {n_with_8k} with 8-Ks")
+    log(f"CIK coverage: {n_mapped}/{len(tickers)} tickers mapped, {n_with_8k} had 8-K filings")
     prim, cats, items = [], [], []
     for _, row in df.iterrows():
         t = triggers_near(cache.get(row["ticker"], []), row["date"])
