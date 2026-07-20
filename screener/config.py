@@ -35,7 +35,10 @@ import re as _re
 # & Equipment" AND Nasdaq's plain "Technology" label — the three feeds name it
 # differently, so match the common root.
 FAVOURED_SECTORS_RE = (r"\btechnology|software|semiconductor|"
-                       r"discretionary|industrial|capital goods|automobile")
+                       r"discretionary|consumer cyclical|industrial|capital goods|automobile")
+# Note: EODHD tags consumer-discretionary names as "Consumer Cyclical" (not the S&P
+# "Consumer Discretionary"), so both labels are matched. "consumer cyclical" is written
+# out in full so it does NOT match "Consumer Non-Cyclicals" (staples), which stay unfavoured.
 AVOID_SECTORS_RE = r"material|pharma|biotech|telecom|real estate"
 HOLD_MONTHS = 3             # locked time-based exit; no price stop-loss
 
