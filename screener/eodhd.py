@@ -255,12 +255,34 @@ def parse_eod(js):
                         index=pd.DatetimeIndex(idx)).sort_index()
 
 
+# Log the first few EOD failures in full (status + body snippet) so a universal
+# zero is diagnosable — a swallowed exception told us nothing last time.
+_eod_diag_budget = 6
+
+
 def eod_series(code, market, start, end, session=None):
+    global _eod_diag_budget
+    import requests
     ex = _EXCHANGE.get(market, "US")
+    sess = session or requests
     try:
-        js = _get(session, f"eod/{code}.{ex}", {"from": start, "to": end, "period": "d"}, timeout=30)
-        return parse_eod(js)
-    except Exception:  # noqa: BLE001
+        r = sess.get(f"{_BASE}/eod/{code}.{ex}",
+                     params={"from": start, "to": end, "period": "d",
+                             "api_token": token(), "fmt": "json"}, timeout=30)
+        if r.status_code != 200:
+            if _eod_diag_budget > 0:
+                log(f"EOD {code}.{ex} HTTP {r.status_code}: {r.text[:200]!r}")
+                _eod_diag_budget -= 1
+            return None
+        px = parse_eod(r.json())
+        if px is None and _eod_diag_budget > 0:
+            log(f"EOD {code}.{ex} HTTP 200 but parse_eod->None; body[:200]={r.text[:200]!r}")
+            _eod_diag_budget -= 1
+        return px
+    except Exception as e:  # noqa: BLE001
+        if _eod_diag_budget > 0:
+            log(f"EOD {code}.{ex} EXCEPTION: {e!r}")
+            _eod_diag_budget -= 1
         return None
 
 
