@@ -139,8 +139,12 @@ cx = np.full(60, 10.0)
 for k in range(11, 18): cx[k] = 10 + (k-10)*0.25      # climbs toward 12
 cx[18:] = 12.6                                          # reclaims pre-drop (12) at day 18, holds
 cxs = pd.Series(cx, index=dates(60))
-bflat = pd.Series(np.full(60, 100.0), index=dates(60))
+# benchmark deliberately SHORTER than the stock (index differs) — reproduces the ASX
+# case where ^AXKO had fewer points than the stock; confirmed_exits must reindex, not
+# index positionally, or it runs off the end of the benchmark.
+bflat = pd.Series(np.full(45, 100.0), index=dates(45))
 ce = confirmed_exits(cxs, bflat, 10, 12.0)
+ok("handles a shorter/misaligned benchmark without IndexError", ce.get("ce_trail") is not None)
 ok("recovery measured from entry (~8 days)", ce["ce_rec_days"] == 8)
 ok("time-exit with N>=rec rides the winner (positive)", ce["ce_te30"] > 0)
 # a name that NEVER recovers to pre-drop -> time-exit cuts it at day N at a loss

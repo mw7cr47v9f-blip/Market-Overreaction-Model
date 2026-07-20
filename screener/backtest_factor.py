@@ -234,6 +234,7 @@ def confirmed_exits(close, bench, entry_pos, pre, grid=TIME_EXIT_GRID):
                         day N. This is the 'don't wait forever for a bounce' rule.
     Each has a matching _exc (excess vs benchmark over the realised hold)."""
     close = close.dropna().sort_index()
+    bench = bench.reindex(close.index).ffill()      # align to stock's dates (positions match close)
     n = len(close); p = int(entry_pos)
     if p < 0 or p + 1 >= n:
         return {}
@@ -241,7 +242,7 @@ def confirmed_exits(close, bench, entry_pos, pre, grid=TIME_EXIT_GRID):
     if e <= 0:
         return {}
     end = min(p + EXIT_MAX, n - 1)
-    b0 = float(bench.iloc[p]) if p < len(bench) else 0.0
+    b0 = float(bench.iloc[p]) if (p < len(bench) and pd.notna(bench.iloc[p])) else 0.0
 
     def bexc(exit_pos, r):
         if exit_pos is None or exit_pos >= n or b0 <= 0:
