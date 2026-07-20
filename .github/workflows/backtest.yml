@@ -21,8 +21,13 @@ on:
         description: "Cap tickers processed (eodhd probe). 0 = full universe. Try 300 first to measure ETA."
         default: "0"
       exchanges:
-        description: "eodhd venue families to keep (NYSE / NASDAQ / AMEX / ARCA), comma-separated. Default NYSE."
+        description: "eodhd venue families to keep (NYSE / NASDAQ / AMEX / ARCA), comma-separated. US only. Default NYSE."
         default: "NYSE"
+      market:
+        description: "eodhd market: US / ASX / TSX / LSE. Non-US runs the gated model (no SEC director data)."
+        default: "US"
+        type: choice
+        options: ["US", "ASX", "TSX", "LSE"]
 
 permissions:
   contents: write
@@ -49,11 +54,14 @@ jobs:
         env:
           SEC_USER_AGENT: "Market-Overreaction-Backtest research keegancrage@icloud.com"
           EODHD_API_TOKEN: ${{ secrets.EODHD_API_TOKEN }}
-        run: python -m screener.backtest_factor --years "${{ inputs.years }}" --markets "${{ inputs.markets }}" --source "${{ inputs.source }}" --limit "${{ inputs.limit }}" --exchanges "${{ inputs.exchanges }}" --data-dir data
+        run: python -m screener.backtest_factor --years "${{ inputs.years }}" --markets "${{ inputs.markets }}" --source "${{ inputs.source }}" --limit "${{ inputs.limit }}" --exchanges "${{ inputs.exchanges }}" --market "${{ inputs.market }}" --data-dir data
       - name: Commit results
         run: |
           git config user.name  "asx-screen-bot"
           git config user.email "actions@github.com"
-          git add data/backtest_events.csv data/backtest_summary.json
+          # Keep a market-tagged copy so consecutive market runs don't clobber each other.
+          if [ -f data/backtest_events.csv ]; then
+            cp data/backtest_events.csv "data/backtest_events_${{ inputs.market }}.csv"; fi
+          git add data/backtest_events.csv data/backtest_summary.json "data/backtest_events_${{ inputs.market }}.csv"
           if git diff --cached --quiet; then echo "No changes."; else
-            git commit -m "Factor backtest $(date -u +%Y-%m-%d)"; git push; fi
+            git commit -m "Factor backtest ${{ inputs.market }} $(date -u +%Y-%m-%d)"; git push; fi
