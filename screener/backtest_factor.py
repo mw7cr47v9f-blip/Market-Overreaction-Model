@@ -858,23 +858,26 @@ def _finalise(rows, data_dir, source="yfinance"):
     print(json.dumps({k: summary[k] for k in ("n_events", "baseline_3m", "by_horizon") if k in summary}, indent=2))
 
 
-def run_eodhd(years, data_dir, limit=0, exchanges=("NYSE",)):
-    """Survivorship-free US backtest: EODHD universe INCLUDING delisted names +
-    EODHD adjusted EOD prices, streamed one ticker at a time (bounded memory).
-    Fundamentals point-in-time (EODHD), insider from SEC Form 4, benchmarks from
-    yfinance indices (no survivorship issue)."""
+def run_eodhd(years, data_dir, limit=0, exchanges=("NYSE",), market="US"):
+    """Survivorship-free backtest for one market: EODHD universe INCLUDING delisted
+    names + EODHD adjusted EOD prices, streamed one ticker at a time (bounded memory).
+    Fundamentals point-in-time (EODHD, all markets). Insider from SEC Form 4 is US-ONLY
+    (SEC has no non-US filings), so the director-buy filter only applies to US runs.
+    Benchmarks from yfinance indices (no survivorship issue). exchanges=None keeps all
+    common stock (used for non-US markets, which have no NYSE-style venue families)."""
     import time
     from datetime import date, timedelta
     import requests
     if not eodhd.token():
         log("no EODHD_API_TOKEN — cannot run the survivorship-free path"); return
-    load_us_bond()
+    if market == "US":
+        load_us_bond()
     s = requests.Session()
     end = date.today()
     start = end - timedelta(days=int(years * 365) + 400)
     start_s, end_s = start.isoformat(), end.isoformat()
-    mcfg = cfg.market_params("US")
-    uni = eodhd.universe("US", include_delisted=True, exchanges=exchanges, session=s)
+    mcfg = cfg.market_params(market)
+    uni = eodhd.universe(market, include_delisted=True, exchanges=exchanges, session=s)
     if uni is None or len(uni) == 0:
         log("no EODHD universe, aborting"); return
     full_n = len(uni)
@@ -901,7 +904,7 @@ def run_eodhd(years, data_dir, limit=0, exchanges=("NYSE",)):
     t0 = time.time()
     scanned, overlap_logged = 0, False
     for i, code in enumerate(codes):
-        px = eodhd.eod_series(code, "US", start_s, end_s, session=s)
+        px = eodhd.eod_series(code, market, start_s, end_s, session=s)
         time.sleep(0.02)
         if px is None or len(px) < need:
             continue
@@ -927,21 +930,24 @@ def run_eodhd(years, data_dir, limit=0, exchanges=("NYSE",)):
         f"({per*1000:.0f} ms/ticker), {scanned} had enough history to scan "
         f"({len(codes)-scanned} skipped). FULL-UNIVERSE ETA for Pass 1 = "
         f"{full_n*per/60:.0f} min over {full_n} tickers.")
-    log(f"US survivorship-free: {sum(len(v) for v in evmap.values())} events across {len(evmap)} names")
+    log(f"{market} survivorship-free: {sum(len(v) for v in evmap.values())} events across {len(evmap)} names")
 
     insider_map = {}
-    try:
-        ev_by_tk = {code: [e["date"] for e in evs] for code, evs in evmap.items()}
-        insider_map = us_insiders.insider_signals_for_events(ev_by_tk, years=years)
-    except Exception as e:  # noqa: BLE001
-        log(f"insider fetch failed: {e!r}")
+    if market == "US":                    # SEC Form 4 is US-only -> director filter is US-only
+        try:
+            ev_by_tk = {code: [e["date"] for e in evs] for code, evs in evmap.items()}
+            insider_map = us_insiders.insider_signals_for_events(ev_by_tk, years=years)
+        except Exception as e:  # noqa: BLE001
+            log(f"insider fetch failed: {e!r}")
+    else:
+        log(f"{market}: no SEC insider data (director-buy filter is US-only) — gated model")
 
     # Pass 2 — fundamentals (point-in-time) + all metrics per event.
     rows = []
     for j, (code, evs) in enumerate(evmap.items()):
         px = pxcache[code]
         try:
-            fund = eodhd.fundamentals(code, "US", session=s)
+            fund = eodhd.fundamentals(code, market, session=s)
         except Exception:  # noqa: BLE001
             fund = None
         sec = fund.get("sector") if fund else None
@@ -955,10 +961,10 @@ def run_eodhd(years, data_dir, limit=0, exchanges=("NYSE",)):
             iw = ev["pos"] - ev["window_len"]
             if epos is not None and iw >= 0:
                 cex = confirmed_exits(px["Close"], bench, epos, float(px["Close"].iloc[iw]))
-            mm = metrics_for_event(fund, ev["date"], ev["entry"], "US") if fund else {}
+            mm = metrics_for_event(fund, ev["date"], ev["entry"], market) if fund else {}
             ins = insider_map.get((code, ev["date"]), {})
-            rows.append({"market": "US", "ticker": code, "name": name_by.get(code, code),
-                         "sector": sec, "exchange": "US-SF", "date": ev["date"],
+            rows.append({"market": market, "ticker": code, "name": name_by.get(code, code),
+                         "sector": sec, "exchange": f"{market}-SF", "date": ev["date"],
                          "year": int(ev["date"][:4]), "window_len": ev["window_len"],
                          "raw": ev["raw"], "z": ev["z"], **fm, **et, **xr, **cex, **mm, **ins})
         if (j + 1) % 1000 == 0:
@@ -977,6 +983,8 @@ def main():
     ap.add_argument("--exchanges", default="NYSE",
                     help="eodhd path: canonical venue families to keep, comma-separated "
                          "(NYSE / NASDAQ / AMEX / ARCA). Default NYSE. 'ALL' keeps everything.")
+    ap.add_argument("--market", default="US", choices=list(cfg.MARKETS),
+                    help="eodhd path: which market to run survivorship-free (US/ASX/TSX/LSE).")
     ap.add_argument("--self-test", action="store_true")
     a = ap.parse_args()
     if a.self_test:
@@ -986,9 +994,13 @@ def main():
         from . import test_eodhd     # noqa: F401
         return
     if a.source == "eodhd":
-        exch = None if a.exchanges.strip().upper() == "ALL" else \
-            [x.strip().upper() for x in a.exchanges.split(",") if x.strip()]
-        run_eodhd(a.years, a.data_dir, a.limit, exchanges=exch)
+        # Non-US markets have no NYSE-style venue families -> keep all common stock.
+        if a.market == "US":
+            exch = None if a.exchanges.strip().upper() == "ALL" else \
+                [x.strip().upper() for x in a.exchanges.split(",") if x.strip()]
+        else:
+            exch = None
+        run_eodhd(a.years, a.data_dir, a.limit, exchanges=exch, market=a.market)
     else:
         markets = [m.strip() for m in a.markets.split(",") if m.strip()] or list(cfg.MARKETS)
         run(markets, a.years, a.data_dir, a.limit)

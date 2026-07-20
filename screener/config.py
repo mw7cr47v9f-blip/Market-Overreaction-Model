@@ -131,6 +131,31 @@ MARKETS = {
         "universe": "sp1500",
         "announcements": "sec",
     },
+    # Survivorship-free EODHD backtest markets (broadening the book). No SEC insider
+    # data outside the US, so these run the GATED model (no director-buy filter) until
+    # a per-market director source is wired. Liquidity floors in local currency.
+    "TSX": {
+        "suffix": ".TO",
+        "currency": "CAD",
+        "min_market_cap": 200_000_000,       # >= C$200m
+        "min_avg_daily_value": 1_000_000,    # C$/day liquidity floor
+        "large_cap_cutoff": 10_000_000_000,  # >= C$10bn -> composite benchmark
+        "benchmark_large": "^GSPTSE",        # S&P/TSX Composite
+        "benchmark_small": "^GSPTSE",        # (no reliable free TSX small-cap index; composite proxy)
+        "universe": "eodhd",
+        "announcements": "none",
+    },
+    "LSE": {
+        "suffix": ".L",
+        "currency": "GBP",
+        "min_market_cap": 100_000_000,       # >= £100m
+        "min_avg_daily_value": 500_000,      # £/day liquidity floor
+        "large_cap_cutoff": 5_000_000_000,   # >= £5bn -> FTSE 100
+        "benchmark_large": "^FTSE",          # FTSE 100
+        "benchmark_small": "^FTMC",          # FTSE 250 (mid/small proxy for overreaction cohort)
+        "universe": "eodhd",
+        "announcements": "none",
+    },
 }
 
 # ASX module-level defaults kept so the config module itself doubles as an ASX
