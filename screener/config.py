@@ -35,11 +35,17 @@ import re as _re
 # & Equipment" AND Nasdaq's plain "Technology" label — the three feeds name it
 # differently, so match the common root.
 FAVOURED_SECTORS_RE = (r"\btechnology|software|semiconductor|"
-                       r"discretionary|consumer cyclical|industrial|capital goods|automobile")
+                       r"discretionary|consumer cyclical|industrial|capital goods|automobile|"
+                       r"energy")
 # Note: EODHD tags consumer-discretionary names as "Consumer Cyclical" (not the S&P
 # "Consumer Discretionary"), so both labels are matched. "consumer cyclical" is written
-# out in full so it does NOT match "Consumer Non-Cyclicals" (staples), which stay unfavoured.
-AVOID_SECTORS_RE = r"material|pharma|biotech|telecom|real estate"
+# out in full so it does NOT match "Consumer Non-Cyclicals" (staples).
+# Energy added: it carries favoured-level per-trade excess (+3.3%) on a decent sample and
+# widens the book. Consumer Defensive was tested too but left out — it lowered the
+# portfolio Sharpe (higher volatility), so the net was a poorer risk-adjusted book.
+AVOID_SECTORS_RE = r"material|pharma|biotech|telecom|communication|real estate"
+# "communication" added: Communication Services was the worst sector (46% hit, -6.9%
+# excess, negative Sharpe) — an explicit hard-avoid.
 HOLD_MONTHS = 3             # locked time-based exit; no price stop-loss
 
 # ---- Profitability gate (added from the survivorship-free factor study) ------
