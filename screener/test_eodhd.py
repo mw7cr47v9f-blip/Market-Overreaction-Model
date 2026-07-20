@@ -93,13 +93,31 @@ ok("eod parsed to 2 rows", len(px) == 2)
 ok("uses adjusted_close", abs(px["Close"].iloc[0] - 9.5) < 1e-9)
 ok("empty eod -> None", eodhd.parse_eod([]) is None)
 
-print("Streaming survivorship-free run (monkeypatched, no network):")
 import os, tempfile, json
 import numpy as np, pandas as pd
 from screener import backtest_factor as bf
 from screener import data as datamod
 from screener import us_insiders
 from screener import config as cfg
+
+print("tz-mismatch guard (EODHD prices vs yfinance tz-aware benchmark):")
+_tzN = pd.bdate_range("2019-01-02", periods=400)
+def _tz_crash():
+    rng = np.random.default_rng(3); r = rng.normal(0, 0.008, 400); r[0] = 0
+    c = 10 * np.cumprod(1 + r); c[150] = c[149] * 0.80; c[151] = c[150] * 1.03
+    for i in range(152, 400): c[i] = c[i-1] * 1.001
+    return pd.Series(c, index=_tzN), pd.Series(np.full(400, 1e8), index=_tzN)
+_c, _v = _tz_crash()
+_mcfgUS = cfg.market_params("US")
+_bn = pd.Series(np.full(400, 7000.0), index=_tzN)                            # aligned
+_ba = pd.Series(np.full(400, 7000.0), index=_tzN.tz_localize("America/New_York"))  # yf-style
+ok("aligned tz-naive bench -> event fires", len(bf.detect_events(_c, _v, _bn, _mcfgUS)) >= 1)
+ok("tz-aware bench (raw) -> HARD ZERO (the bug)", len(bf.detect_events(_c, _v, _ba, _mcfgUS)) == 0)
+ok("normalised tz-aware bench -> event restored",
+   len(bf.detect_events(_c, _v, bf.to_naive_daily(_ba), _mcfgUS)) >= 1)
+ok("to_naive_daily strips tz", bf.to_naive_daily(_ba).index.tz is None)
+
+print("Streaming survivorship-free run (monkeypatched, no network):")
 
 _N = 400
 _idx = pd.bdate_range("2023-01-02", periods=_N)
@@ -113,7 +131,10 @@ def _calm_series():
     rng = np.random.default_rng(1); r = rng.normal(0, 0.008, _N); r[0] = 0
     return pd.DataFrame({"Close": 10*np.cumprod(1+r), "Volume": np.full(_N, 1e8)}, index=_idx)
 _PX = {"AAA": _crash_series(), "CALM": _calm_series()}
-_bench = pd.Series(np.full(_N, 7000.0), index=_idx)
+# tz-AWARE benchmark (yfinance-daily style) — exercises run_eodhd's tz normalisation.
+# If that normalisation is removed, the reindex goes all-NaN and AAA produces 0
+# events, failing the "AAA crash produced an event" assertion below.
+_bench = pd.Series(np.full(_N, 7000.0), index=_idx.tz_localize("America/New_York"))
 
 bf.eodhd.token = lambda: "TESTTOKEN"
 bf.eodhd.universe = lambda market="US", include_delisted=True, exchanges=("NYSE",), session=None: pd.DataFrame(

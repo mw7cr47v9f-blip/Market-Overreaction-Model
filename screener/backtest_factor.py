@@ -43,6 +43,22 @@ def log(m): print(f"[factor] {m}", file=sys.stderr, flush=True)
 
 # ---- vectorised event detection ------------------------------------------
 
+def to_naive_daily(s):
+    """Force a price/benchmark Series onto a tz-naive, midnight-normalised daily
+    DatetimeIndex. Critical when mixing sources: EODHD prices are tz-naive dates
+    but yfinance daily bars can be tz-AWARE (US/Eastern). A reindex across that
+    mismatch silently yields all-NaN, so every index-relative drop is NaN and NO
+    event can ever fire (a hard zero). Normalising both sides first prevents it."""
+    if s is None:
+        return None
+    idx = pd.DatetimeIndex(s.index)
+    if idx.tz is not None:
+        idx = idx.tz_localize(None)
+    idx = idx.normalize()
+    out = pd.Series(np.asarray(s.values), index=idx)
+    return out[~out.index.duplicated(keep="last")].sort_index()
+
+
 def detect_events(close, volume, bench, mcfg, cooldown=COOLDOWN):
     """Return list of event dicts for one ticker (price screen only)."""
     close = close.dropna().sort_index()
@@ -773,6 +789,11 @@ def run_eodhd(years, data_dir, limit=0, exchanges=("NYSE",)):
         bench = benches.get(mcfg.BENCHMARK_200)
     if bench is None:
         log("no benchmark, aborting"); return
+    # yfinance daily bars may be tz-aware; EODHD prices are tz-naive. Align the
+    # benchmark to a tz-naive daily index so index-relative drops are not all-NaN.
+    bench = to_naive_daily(bench)
+    log(f"benchmark {mcfg.BENCHMARK_300}: {len(bench)} points, "
+        f"{bench.index.min().date()}..{bench.index.max().date()} (tz-naive)")
     name_by = dict(zip(uni["code"], uni["name"]))
     need = cfg.VOL_LOOKBACK + max(cfg.WINDOW_LENGTHS) + 5
 
@@ -780,11 +801,20 @@ def run_eodhd(years, data_dir, limit=0, exchanges=("NYSE",)):
     evmap, pxcache = {}, {}
     codes = list(uni["code"])
     t0 = time.time()
+    scanned, overlap_logged = 0, False
     for i, code in enumerate(codes):
         px = eodhd.eod_series(code, "US", start_s, end_s, session=s)
         time.sleep(0.02)
         if px is None or len(px) < need:
             continue
+        px = px[~px.index.duplicated(keep="last")].sort_index()
+        px.index = pd.DatetimeIndex(px.index).tz_localize(None).normalize()
+        scanned += 1
+        if not overlap_logged:                       # one-time sanity check vs the tz bug
+            ov = px.index.intersection(bench.index)
+            log(f"index-overlap check ({code}): {len(ov)} shared dates of {len(px)} "
+                f"price rows — {'OK' if len(ov) > 100 else 'WARNING: benchmark misaligned!'}")
+            overlap_logged = True
         evs = detect_events(px["Close"], px["Volume"], bench, mcfg)
         if evs:
             evmap[code] = evs
@@ -796,7 +826,8 @@ def run_eodhd(years, data_dir, limit=0, exchanges=("NYSE",)):
     elapsed = time.time() - t0
     per = elapsed / max(len(codes), 1)
     log(f"Pass 1 done: {len(codes)} tickers in {elapsed/60:.1f} min "
-        f"({per*1000:.0f} ms/ticker). FULL-UNIVERSE ETA for Pass 1 = "
+        f"({per*1000:.0f} ms/ticker), {scanned} had enough history to scan "
+        f"({len(codes)-scanned} skipped). FULL-UNIVERSE ETA for Pass 1 = "
         f"{full_n*per/60:.0f} min over {full_n} tickers.")
     log(f"US survivorship-free: {sum(len(v) for v in evmap.values())} events across {len(evmap)} names")
 
