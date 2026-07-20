@@ -1,0 +1,45 @@
+name: Tag events with 8-K triggers (manual)
+
+# Reads the committed survivorship-free events, fetches each company's SEC Form 8-K
+# history (free), tags every event with the KIND of bad news around its drop
+# (earnings / guidance / contract_loss / cost_impair / distress / corporate / ...),
+# and commits data/backtest_events_tagged.csv for the trigger-type study.
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Cap events processed (0 = all)"
+        default: "0"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tag-triggers
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Self-test (trigger tagging)
+        run: python -m screener.sec_triggers --self-test
+      - name: Tag events
+        env:
+          SEC_USER_AGENT: "Market-Overreaction-Triggers research keegancrage@icloud.com"
+        run: python -m screener.sec_triggers --events data/backtest_events.csv --out data/backtest_events_tagged.csv --limit "${{ inputs.limit }}"
+      - name: Commit results
+        run: |
+          git config user.name  "asx-screen-bot"
+          git config user.email "actions@github.com"
+          git add data/backtest_events_tagged.csv
+          if git diff --cached --quiet; then echo "No changes."; else
+            git commit -m "Tag events with 8-K triggers $(date -u +%Y-%m-%d)"; git push; fi
