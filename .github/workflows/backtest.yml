@@ -10,8 +10,19 @@ on:
         description: "Years of history to scan"
         default: "5"
       markets:
-        description: "Markets (blank = ASX and US)"
+        description: "Markets for the yfinance path (blank = ASX and US)"
         default: ""
+      source:
+        description: "Data source: yfinance (survivor-only) or eodhd (survivorship-free US)"
+        default: "yfinance"
+        type: choice
+        options: ["yfinance", "eodhd"]
+      limit:
+        description: "Cap tickers processed (eodhd probe). 0 = full universe. Try 300 first to measure ETA."
+        default: "0"
+      exchanges:
+        description: "eodhd venue families to keep (NYSE / NASDAQ / AMEX / ARCA), comma-separated. Default NYSE."
+        default: "NYSE"
 
 permissions:
   contents: write
@@ -37,7 +48,8 @@ jobs:
       - name: Run backtest
         env:
           SEC_USER_AGENT: "Market-Overreaction-Backtest research keegancrage@icloud.com"
-        run: python -m screener.backtest_factor --years "${{ inputs.years }}" --markets "${{ inputs.markets }}" --data-dir data
+          EODHD_API_TOKEN: ${{ secrets.EODHD_API_TOKEN }}
+        run: python -m screener.backtest_factor --years "${{ inputs.years }}" --markets "${{ inputs.markets }}" --source "${{ inputs.source }}" --limit "${{ inputs.limit }}" --exchanges "${{ inputs.exchanges }}" --data-dir data
       - name: Commit results
         run: |
           git config user.name  "asx-screen-bot"
