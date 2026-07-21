@@ -127,18 +127,17 @@ MARKETS = {
     "US": {
         "suffix": "",
         "currency": "USD",
-        # Universe is the S&P 1500 (large+mid+small); its members already sit
-        # comfortably above US$1bn, so we set the floor there and skip the long
-        # tail of micro-caps (keeps the daily yfinance pull tractable). Flagged.
+        # LIVE universe is NYSE-listed (the backtest's scope), sourced from a free
+        # GitHub mirror carrying sector + marketCap — so live matches the backtest and
+        # needs NO EODHD key. The >=US$1bn floor bounds the daily yfinance pull; the
+        # screen's stage-2 gate re-verifies caps. NASDAQ is a tested-but-not-yet-adopted
+        # widening (would change "universe" to "us_expanded").
         "min_market_cap": 1_000_000_000,     # >= US$1bn
         "min_avg_daily_value": 2_000_000,    # US$/day liquidity floor (US trades heavier)
         "large_cap_cutoff": 20_000_000_000,  # >= US$20bn benchmarks vs S&P 500
         "benchmark_large": "^GSPC",          # S&P 500
         "benchmark_small": "^RUT",           # Russell 2000
-        # LIVE stays S&P 1500 until the Nasdaq widening is validated in the backtest;
-        # the backtest overrides this to "us_expanded" (S&P 1500 + Nasdaq). Flip this
-        # to "us_expanded" once the re-run confirms the added cohort earns its place.
-        "universe": "sp1500",
+        "universe": "nyse",
         "announcements": "sec",
     },
     # Survivorship-free EODHD backtest markets (broadening the book). No SEC insider

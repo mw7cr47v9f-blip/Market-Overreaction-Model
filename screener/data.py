@@ -32,6 +32,8 @@ def get_universe(mcfg, local_fallback: Optional[str] = None) -> pd.DataFrame:
         return _asx_universe(local_fallback)
     if kind == "sp1500":
         return _sp1500_universe(local_fallback)
+    if kind == "nyse":
+        return _nyse_universe(getattr(mcfg, "MIN_MARKET_CAP", 0), local_fallback)
     if kind == "us_expanded":
         return _us_expanded_universe(local_fallback)
     raise ValueError(f"Unknown universe source: {kind}")
@@ -141,6 +143,8 @@ def _sp1500_universe(local_fallback: Optional[str]) -> pd.DataFrame:
 
 _NASDAQ_URL = ("https://raw.githubusercontent.com/rreichel3/US-Stock-Symbols/"
                "main/nasdaq/nasdaq_full_tickers.json")
+_NYSE_URL = ("https://raw.githubusercontent.com/rreichel3/US-Stock-Symbols/"
+             "main/nyse/nyse_full_tickers.json")
 
 
 def _parse_cap(v) -> Optional[float]:
@@ -174,6 +178,40 @@ def _nasdaq_universe(min_cap: float) -> pd.DataFrame:
                      "sector": sec, "yahoo": sym.replace(".", "-"), "exchange": "NASDAQ"})
     df = pd.DataFrame(recs)
     log(f"Nasdaq (GitHub mirror): {len(df)} common stocks >= size floor with sector")
+    return df
+
+
+def _nyse_universe(min_cap: float, local_fallback: Optional[str] = None) -> pd.DataFrame:
+    """LIVE NYSE-listed universe — matches the backtest's NYSE scope. Uses the same
+    free GitHub mirror as the Nasdaq path (symbol / name / sector / marketCap), so it
+    needs NO EODHD key: sector drives the favoured filter and marketCap bounds the pull
+    to the size floor. The screen's stage-2 gate re-verifies caps from live data."""
+    import re
+    import requests
+    try:
+        r = requests.get(_NYSE_URL, timeout=60, headers={"User-Agent": "Mozilla/5.0"})
+        r.raise_for_status()
+        rows = r.json() or []
+    except Exception as e:  # noqa: BLE001
+        log(f"NYSE mirror failed ({e!r})")
+        if local_fallback:
+            return _local_universe(local_fallback, "")
+        raise
+    recs = []
+    for row in rows:
+        sym = str(row.get("symbol", "")).upper().strip()
+        if not re.match(r"^[A-Z][A-Z.]{0,6}$", sym):          # common stock only (no ^, /, units)
+            continue
+        cap = _parse_cap(row.get("marketCap"))
+        if min_cap and cap is not None and cap < min_cap:      # bound the pull to the size floor
+            continue
+        sec = str(row.get("sector") or "").strip()
+        if not sec:                                            # need a sector for the favoured filter
+            continue
+        recs.append({"code": sym, "name": str(row.get("name", "")).strip(),
+                     "sector": sec, "yahoo": sym.replace(".", "-"), "exchange": "NYSE"})
+    df = pd.DataFrame(recs)
+    log(f"NYSE (GitHub mirror): {len(df)} common stocks >= size floor with sector")
     return df
 
 

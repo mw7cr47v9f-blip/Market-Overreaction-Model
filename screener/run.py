@@ -246,11 +246,35 @@ def main():
     statemod.write_new(os.path.join(args.data_dir, "candidates_new.json"), favoured_new, scan_date)
     statemod.save_state(state_path, seen.union({c.key() for c in all_finals}), scan_date)
 
-    # BUY/SELL ledger: model book (favoured signals, 3-month hold) + personal holdings.
+    # CONFIRMED-ENTRY tracking (closes the live gap): a gated drop is NOT bought on the
+    # fall — it enters a 15-trading-day confirmation window and is BOUGHT only on the
+    # confirmed-entry breakout (close above the prior two-day high on above-average
+    # volume). Names that never confirm are skipped. Uses the SAME rule as the backtest.
+    confirmed_today = []
     try:
-        model_buys = [{"market": d["market"], "ticker": d["ticker"], "name": d["name"],
-                       "sector": d.get("sector"), "entry_date": scan_date,
-                       "entry_price": d["last_close"]} for d in favoured_new]
+        from . import confirm as confirmmod
+
+        def _series_for(rec):
+            y = yahoo_by_mc.get((rec.get("market"), str(rec.get("ticker")).upper()))
+            df = all_prices.get(y) if y else None
+            if df is None or len(df) == 0:
+                return None
+            return df["Close"], df["Volume"]
+
+        confirmed_today, pending_now, expired_now = confirmmod.update(
+            args.data_dir, favoured_new, _series_for, scan_date)
+        log(f"confirmations: {len(confirmed_today)} confirmed (BUY today), "
+            f"{len(pending_now)} pending, {len(expired_now)} expired/skipped")
+    except Exception as e:  # noqa: BLE001
+        log(f"confirmation tracking failed: {e!r}")
+
+    # BUY/SELL ledger: the model book buys on CONFIRMED entries (entry date + price are
+    # the breakout bar, not the drop), holds three months. Plus personal holdings.
+    try:
+        model_buys = [{"market": c["market"], "ticker": c["ticker"], "name": c.get("name"),
+                       "sector": c.get("sector"),
+                       "entry_date": c.get("entry_date", scan_date),
+                       "entry_price": c.get("entry_price")} for c in confirmed_today]
         model_report = ledgermod.update_model_ledger(args.data_dir, model_buys, price_lookup, scan_date)
         holdings = ledgermod.holdings_status(args.data_dir, price_lookup, scan_date)
         ledgermod.write_status(args.data_dir, model_report, holdings)
