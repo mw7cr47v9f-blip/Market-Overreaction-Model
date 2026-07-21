@@ -24,10 +24,10 @@ on:
         description: "eodhd venue families to keep (NYSE / NASDAQ / AMEX / ARCA), comma-separated. US only. Default NYSE."
         default: "NYSE"
       market:
-        description: "eodhd market: US / ASX / TSX / LSE. Non-US runs the gated model (no SEC director data)."
+        description: "eodhd market. Non-US runs the gated model (no SEC director data). TSE=Tokyo, SGX=Singapore, SEHK=Hong Kong."
         default: "US"
         type: choice
-        options: ["US", "ASX", "TSX", "LSE"]
+        options: ["US", "ASX", "TSX", "LSE", "TSE", "SGX", "SEHK"]
 
 permissions:
   contents: write
