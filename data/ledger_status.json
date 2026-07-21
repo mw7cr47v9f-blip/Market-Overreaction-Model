@@ -1,0 +1,42 @@
+{
+  "model": {
+    "scan_date": "2026-07-20",
+    "new_buys": [],
+    "closed_this_run": [],
+    "sell_soon": [],
+    "open_positions": [
+      {
+        "market": "US",
+        "ticker": "IBM",
+        "name": "IBM",
+        "sector": "Information Technology",
+        "entry_date": "2026-07-14",
+        "entry_price": 212.67,
+        "last_price": 213.0,
+        "ret_pct": 0.0016,
+        "days_held": 6.0,
+        "sell_due_date": "2026-10-14"
+      },
+      {
+        "market": "US",
+        "ticker": "PNR",
+        "name": "Pentair",
+        "sector": "Industrials",
+        "entry_date": "2026-07-15",
+        "entry_price": 62.45,
+        "last_price": 62.12,
+        "ret_pct": -0.0053,
+        "days_held": 5.0,
+        "sell_due_date": "2026-10-15"
+      }
+    ],
+    "n_open": 2,
+    "realised_tally": {
+      "n_closed": 0,
+      "win_rate": null,
+      "avg_return": null,
+      "median_return": null
+    }
+  },
+  "holdings": []
+}
