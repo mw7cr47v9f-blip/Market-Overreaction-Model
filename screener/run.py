@@ -214,6 +214,33 @@ def main():
             except Exception as e:  # noqa: BLE001
                 log(f"trigger filter failed (keeping all): {e!r}")
 
+    # Director-buy hard filter (locked model): keep only US names with prior-6-month
+    # on-market DIRECTOR BUYING (SEC Form 4). This is the decisive filter in the
+    # survivorship-free backtest. Fails CLOSED per name (no confirmed buy => not
+    # alerted); on a total SEC outage it fails OPEN (keeps all, warns) so the feed does
+    # not go dark — the daily-analysis agent re-confirms director buys as a backstop.
+    # Non-US markets have no SEC Form 4 data, so the filter is applied to US only and
+    # non-US names pass through (director rule applied live by analogy).
+    if cfg.REQUIRE_DIRECTOR_BUY and favoured_new:
+        us_fav = [d for d in favoured_new if d.get("market") == "US"]
+        non_us = [d for d in favoured_new if d.get("market") != "US"]
+        if us_fav:
+            try:
+                ebt = {str(d["ticker"]): [scan_date] for d in us_fav}
+                sigs = us_insiders.insider_signals_for_events(ebt, years=1)
+                kept = []
+                for d in us_fav:
+                    sig = sigs.get((str(d["ticker"]), scan_date), {}) or {}
+                    d["director_buy"] = bool(sig.get("director_buy"))
+                    if d["director_buy"]:
+                        kept.append(d)
+                    else:
+                        log(f"EXCLUDED {d['ticker']}: no prior-6-month director buy")
+                log(f"director-gated (alerted): {len(kept)} of {len(us_fav)} US favoured")
+                favoured_new = kept + non_us
+            except Exception as e:  # noqa: BLE001
+                log(f"director filter failed (keeping all, UNGATED): {e!r}")
+
     # Log EVERYTHING (with tags) to the running CSV; ALERT only favoured names.
     statemod.append_candidates(all_csv, new_rows)
     statemod.write_new(os.path.join(args.data_dir, "candidates_new.json"), favoured_new, scan_date)

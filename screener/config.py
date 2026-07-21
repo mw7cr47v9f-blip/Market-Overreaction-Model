@@ -35,14 +35,15 @@ import re as _re
 # & Equipment" AND Nasdaq's plain "Technology" label — the three feeds name it
 # differently, so match the common root.
 FAVOURED_SECTORS_RE = (r"\btechnology|software|semiconductor|"
-                       r"discretionary|consumer cyclical|industrial|capital goods|automobile|"
-                       r"energy")
+                       r"discretionary|consumer cyclical|industrial|capital goods|automobile")
 # Note: EODHD tags consumer-discretionary names as "Consumer Cyclical" (not the S&P
 # "Consumer Discretionary"), so both labels are matched. "consumer cyclical" is written
 # out in full so it does NOT match "Consumer Non-Cyclicals" (staples).
-# Energy added: it carries favoured-level per-trade excess (+3.3%) on a decent sample and
-# widens the book. Consumer Defensive was tested too but left out — it lowered the
-# portfolio Sharpe (higher volatility), so the net was a poorer risk-adjusted book.
+# Energy: tested in and out as risk-reduction analysis. It carried favoured-level per-trade
+# excess (+3.3%) but its year-by-year contribution was a coin toss — including it, the book
+# beat the S&P calendar return in only 9 of 15 years (60%); excluding it, 11 of 15 (73%),
+# with a higher average annual return on deployed capital. Removed. Consumer Defensive was
+# also tested and left out (raised volatility without adding return).
 AVOID_SECTORS_RE = r"material|pharma|biotech|telecom|communication|real estate"
 # "communication" added: Communication Services was the worst sector (46% hit, -6.9%
 # excess, negative Sharpe) — an explicit hard-avoid.
@@ -89,7 +90,7 @@ def is_bad_trigger(trigger_primary) -> bool:
 # now, to be rebroadened by adding TSX/LSE (and revisiting ASX) under the new rules.
 # Kept False until the combined backtest (confirmed entry + trailing stop + time exit
 # + this filter) is confirmed and the live insider fetch is wired.
-REQUIRE_DIRECTOR_BUY = False
+REQUIRE_DIRECTOR_BUY = True      # LIVE now enforces the locked-model director-buy hard filter
 USE_TRAILING_STOP = False        # exit via trailing stop rather than flat 3-month hold
 TIME_EXIT_DAYS = 0               # >0 = cut a name that hasn't recovered pre-drop by day N
 
