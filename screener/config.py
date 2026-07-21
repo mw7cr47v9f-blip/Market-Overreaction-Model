@@ -99,6 +99,61 @@ def has_director_buy(director_buy) -> bool:
     return director_buy is True or str(director_buy).strip().lower() == "true"
 
 
+# ---- Valuation gate (from the P/E-vs-sector recovery study) ------------------
+# Oversold names that were EXPENSIVE vs their sector BEFORE the drop recover materially
+# worse: in the gated director book the cheapest third hit 68% / +14.3%, the most
+# expensive third only 58% / +8.2%. The effect is monotonic, holds in 13 of 15 years
+# and within every drop-size bucket, is uncorrelated with the margin gate, and stays
+# significant (p=0.0008) after controlling for year, drop size AND margins — a value
+# effect (overvalued names partly deserve the drop). So we HARD-EXCLUDE names whose
+# pre-drop P/E was more than VALUE_REL_PE_MAX x their sector's median. Fails OPEN: a
+# loss-maker or a name with no usable P/E is KEPT (only positively-expensive names go).
+REQUIRE_VALUE = True
+VALUE_REL_PE_MAX = 1.54            # exclude pre-drop P/E > 1.54x the sector median
+_SECTOR_PE_MEDIAN = {             # median pre-drop P/E by favoured sector (US backtest)
+    "technology": 28.5, "software": 28.5, "semiconductor": 28.5,
+    "discretionary": 15.0, "consumer cyclical": 15.0, "automobile": 15.0,
+    "industrial": 18.7, "capital goods": 18.7,
+}
+
+
+def _sector_pe_median(sector):
+    s = str(sector).lower()
+    for k, v in _SECTOR_PE_MEDIAN.items():
+        if k in s:
+            return v
+    return None
+
+
+def predrop_pe(earnings_yield, raw):
+    """Reconstruct the PRE-drop P/E from the post-drop earnings yield and the drop
+    return `raw` (negative). Returns None when not usable (loss-maker / data tail)."""
+    try:
+        ey = float(earnings_yield)
+        r = float(raw)
+    except (TypeError, ValueError):
+        return None
+    ey_pre = ey * (1 + r)
+    if ey_pre <= 0:
+        return None
+    pe = 1.0 / ey_pre
+    return pe if 3 <= pe <= 150 else None
+
+
+def is_value_ok(earnings_yield, raw, sector) -> bool:
+    """Valuation gate. Fails OPEN — a name with no usable P/E or no sector reference is
+    KEPT (True); only a name positively identified as expensive vs its sector is dropped."""
+    if not REQUIRE_VALUE:
+        return True
+    pe = predrop_pe(earnings_yield, raw)
+    if pe is None:
+        return True
+    m = _sector_pe_median(sector)
+    if not m:
+        return True
+    return pe <= VALUE_REL_PE_MAX * m
+
+
 def is_quality(npat_margin, fcf_margin) -> bool:
     """Profitability gate. None (fundamentals missing) fails CLOSED — if we can't
     prove a name isn't deeply loss-making, we don't trade it. Returns True only when

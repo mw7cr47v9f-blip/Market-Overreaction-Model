@@ -26,21 +26,26 @@ _NI = ["NetIncomeLoss", "ProfitLoss"]
 _OCF = ["NetCashProvidedByUsedInOperatingActivities",
         "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations"]
 _CAPEX = ["PaymentsToAcquirePropertyPlantAndEquipment", "PaymentsToAcquireProductiveAssets"]
+# Share count for EPS / earnings yield (valuation gate). Weighted-average diluted is the
+# EPS denominator; fall back to basic, then the cover-page count (handled separately).
+_SHARES = ["WeightedAverageNumberOfDilutedSharesOutstanding",
+           "WeightedAverageNumberOfSharesOutstandingBasic",
+           "WeightedAverageNumberOfShareOutstandingBasicAndDiluted"]
 
 
 def log(m):
     print(f"[sec-fund] {m}", file=sys.stderr, flush=True)
 
 
-def _latest_annual(gaap: dict, tags: list):
-    """Most recent ANNUAL (10-K) USD value across a concept's tag fallbacks.
+def _latest_annual(gaap: dict, tags: list, unit: str = "USD"):
+    """Most recent ANNUAL (10-K) value (in `unit`) across a concept's tag fallbacks.
     Returns (value, end_date) or (None, None)."""
     for tag in tags:
         node = gaap.get(tag)
         if not isinstance(node, dict):
             continue
         best = None
-        for e in (node.get("units", {}) or {}).get("USD", []) or []:
+        for e in (node.get("units", {}) or {}).get(unit, []) or []:
             form = str(e.get("form", ""))
             end = e.get("end")
             val = e.get("val")
@@ -57,18 +62,27 @@ def margins_from_companyfacts(js) -> dict:
     """companyfacts JSON -> {npat_margin, fcf_margin} from the latest 10-K.
     SEC capex is a positive outflow, so FCF = operating cash flow - capex."""
     if not isinstance(js, dict):
-        return {"npat_margin": None, "fcf_margin": None}
-    gaap = ((js.get("facts", {}) or {}).get("us-gaap", {}) or {})
+        return {"npat_margin": None, "fcf_margin": None, "net_income": None, "shares": None}
+    facts = js.get("facts", {}) or {}
+    gaap = facts.get("us-gaap", {}) or {}
     rev, _ = _latest_annual(gaap, _REV)
     ni, _ = _latest_annual(gaap, _NI)
     ocf, _ = _latest_annual(gaap, _OCF)
     capex, _ = _latest_annual(gaap, _CAPEX)
+    # Shares for the valuation gate: weighted-average diluted (10-K), else the dei
+    # cover-page common-share count. Both live under the "shares" unit.
+    shares, _ = _latest_annual(gaap, _SHARES, unit="shares")
+    if not shares:
+        dei = facts.get("dei", {}) or {}
+        shares, _ = _latest_annual(dei, ["EntityCommonStockSharesOutstanding"], unit="shares")
     if not rev:                       # no revenue -> can't form margins (fail closed later)
-        return {"npat_margin": None, "fcf_margin": None}
+        return {"npat_margin": None, "fcf_margin": None,
+                "net_income": ni, "shares": shares}
     npat = (ni / rev) if ni is not None else None
     fcf = ((ocf - capex) / rev) if (ocf is not None and capex is not None) else None
     return {"npat_margin": round(npat, 4) if npat is not None else None,
-            "fcf_margin": round(fcf, 4) if fcf is not None else None}
+            "fcf_margin": round(fcf, 4) if fcf is not None else None,
+            "net_income": ni, "shares": shares}
 
 
 def margins_for_tickers(tickers, session=None) -> dict:

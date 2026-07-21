@@ -163,6 +163,10 @@ def main():
                     mm = margins.get(d["ticker"], {})
                     d["npat_margin"] = mm.get("npat_margin")
                     d["fcf_margin"] = mm.get("fcf_margin")
+                    # Earnings yield (net income / (shares * post-drop price)) for the
+                    # valuation gate; the pre-drop P/E is reconstructed in cfg.is_value_ok.
+                    ni, sh, px = mm.get("net_income"), mm.get("shares"), d.get("last_close")
+                    d["earnings_yield"] = round(ni / (sh * px), 4) if (ni and sh and px) else None
             except Exception as e:  # noqa: BLE001
                 log(f"SEC fundamentals fetch failed: {e!r}")
 
@@ -183,6 +187,20 @@ def main():
                 f"all {len(favoured_new)} favoured UNGATED. Attach npat_margin/fcf_margin.")
     else:
         log(f"quality gate OFF — alerting all {len(favoured_new)} favoured")
+
+    # Valuation gate (P/E-vs-sector study): hard-exclude names whose PRE-drop P/E was
+    # expensive vs their sector — those recover materially worse. Fails OPEN: a name with
+    # no usable P/E (loss-maker / missing earnings_yield) is kept.
+    if cfg.REQUIRE_VALUE and favoured_new:
+        kept = []
+        for d in favoured_new:
+            drop = d.get("raw_return", d.get("raw"))
+            if cfg.is_value_ok(d.get("earnings_yield"), drop, d.get("sector")):
+                kept.append(d)
+            else:
+                log(f"EXCLUDED {d.get('ticker')}: overvalued vs sector (pre-drop P/E)")
+        log(f"value-gated (alerted): {len(kept)} of {len(favoured_new)} favoured")
+        favoured_new = kept
 
     # Structural-trigger hard filter (8-K study): drop names whose fall was caused by a
     # lost contract / impairment / distress event — those don't mean-revert. Fails OPEN:
