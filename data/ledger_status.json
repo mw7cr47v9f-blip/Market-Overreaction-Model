@@ -1,6 +1,6 @@
 {
   "model": {
-    "scan_date": "2026-07-20",
+    "scan_date": "2026-07-21",
     "new_buys": [],
     "closed_this_run": [],
     "sell_soon": [],
@@ -12,9 +12,9 @@
         "sector": "Information Technology",
         "entry_date": "2026-07-14",
         "entry_price": 212.67,
-        "last_price": 213.0,
-        "ret_pct": 0.0016,
-        "days_held": 6.0,
+        "last_price": 210.5,
+        "ret_pct": -0.0102,
+        "days_held": 7.0,
         "sell_due_date": "2026-10-14"
       },
       {
@@ -24,9 +24,9 @@
         "sector": "Industrials",
         "entry_date": "2026-07-15",
         "entry_price": 62.45,
-        "last_price": 62.12,
-        "ret_pct": -0.0053,
-        "days_held": 5.0,
+        "last_price": 61.48,
+        "ret_pct": -0.0155,
+        "days_held": 6.0,
         "sell_due_date": "2026-10-15"
       }
     ],
