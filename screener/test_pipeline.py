@@ -44,10 +44,10 @@ UNIVERSE = pd.DataFrame({
 })
 PRICES = {
     "AAA.AX":  _df(_crash_last(_quiet(N, 0.01, seed=1), -0.18), 5_000_000),   # mid cap crash
-    "BIG.AX":  _df(_crash_last(_quiet(N, 0.01, seed=2), -0.15), 5_000_000),   # large cap crash
+    "BIG.AX":  _df(_crash_last(_quiet(N, 0.01, seed=2), -0.22), 5_000_000),   # large cap crash (clears 20% floor)
     "SML.AX":  _df(_crash_last(_quiet(N, 0.01, seed=3), -0.18), 5_000_000),   # sub-$100m -> drop
     "CALM.AX": _df(_quiet(N, 0.01, seed=4), 5_000_000),                       # no crash
-    "AVOI.AX": _df(_crash_last(_quiet(N, 0.01, seed=5), -0.18), 5_000_000),   # crash but AVOID sector
+    "AVOI.AX": _df(_crash_last(_quiet(N, 0.01, seed=5), -0.24), 5_000_000),   # crash but AVOID sector (clears 20% floor)
 }
 BENCHES = {cfg.BENCHMARK_200: pd.Series(_quiet(N, 0.003, 7000, 99), index=IDX),
            cfg.BENCHMARK_300: pd.Series(_quiet(N, 0.003, 7000, 98), index=IDX)}
@@ -101,7 +101,9 @@ def main():
         # all three size+price qualifiers (AAA, BIG, AVOI) are de-duped in state
         check("state.json records 3 seen keys", len(json.load(open(os.path.join(d, "state.json")))["seen"]) == 3)
         model = json.load(open(os.path.join(d, "ledger_status.json")))["model"]
-        check("ledger opened 2 favoured model positions", model["n_open"] == 2)
+        # Confirmed-entry model: a day-1 crash is PENDING confirmation, not bought, so the
+        # ledger opens 0 today (the two names sit in pending_confirmations until a breakout).
+        check("ledger opens 0 on day-1 crash (confirmed-entry: pending, not bought)", model["n_open"] == 0)
 
         print("Second run (same data) — must dedup to zero new:")
         run_once(d)

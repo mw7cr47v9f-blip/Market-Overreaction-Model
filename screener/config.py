@@ -29,9 +29,12 @@ VOL_LOOKBACK = 90            # trailing trading days for the volatility baseline
 MIN_VOL_OBS = 40            # min trailing returns to trust the vol estimate
 HISTORY_CALENDAR_DAYS = 200
 
-# ---- Sector tilt (the locked model favours these, hard-excludes the avoids) --
-# Backtest verdict: favoured-only book had the best risk-adjusted return (Sharpe
-# ~1.5); the avoid-sectors LOST to the market at equal volatility. See methodology.
+# ---- Sector scope (keep everything EXCEPT the avoid-list) --------------------
+# UPDATED from the full survivorship-free NYSE run: with the director + value gates
+# doing the selecting, restricting to FAVOURED sectors threw away good trades.
+# Broadening to "all-except-avoid" lifted the book 92 -> 198 trades AND raised the
+# per-trade return (+22.7% -> +24.2%) and hit rate (77% -> 80%). So we keep the
+# avoid-list (it still earns its place) but drop the favoured-only wall.
 import re as _re
 # "technology" (bare) covers S&P "Information Technology", ASX "Technology Hardware
 # & Equipment" AND Nasdaq's plain "Technology" label — the three feeds name it
@@ -49,6 +52,8 @@ FAVOURED_SECTORS_RE = (r"\btechnology|software|semiconductor|"
 AVOID_SECTORS_RE = r"material|pharma|biotech|telecom|communication|real estate"
 # "communication" added: Communication Services was the worst sector (46% hit, -6.9%
 # excess, negative Sharpe) — an explicit hard-avoid.
+FAVOURED_ONLY = False      # False = broad (keep all EXCEPT avoids, the locked model);
+                           # True  = revert to the narrow favoured-only book.
 HOLD_MONTHS = 3             # locked time-based exit; no price stop-loss
 
 # ---- Profitability gate (added from the survivorship-free factor study) ------
@@ -69,6 +74,14 @@ def is_favoured(sector) -> bool:
 
 def is_avoided(sector) -> bool:
     return bool(_re.search(AVOID_SECTORS_RE, str(sector).lower()))
+
+
+def is_sector_ok(sector) -> bool:
+    """The live sector gate. Broad by default: keep everything EXCEPT the avoid-list.
+    Set FAVOURED_ONLY=True to revert to the narrow favoured-only book."""
+    if is_avoided(sector):
+        return False
+    return is_favoured(sector) if FAVOURED_ONLY else True
 
 
 # ---- Trigger-type filter (from the 8-K trigger study) ------------------------
@@ -95,10 +108,30 @@ def is_bad_trigger(trigger_primary) -> bool:
 REQUIRE_DIRECTOR_BUY = True      # LIVE now enforces the locked-model director-buy hard filter
 USE_TRAILING_STOP = False        # exit via trailing stop rather than flat 3-month hold
 TIME_EXIT_DAYS = 0               # >0 = cut a name that hasn't recovered pre-drop by day N
+# Size floor on the director buy (the "wife/husband test"): the full NYSE run showed
+# sub-$50k "goodwill" buys hit only ~60% — no better than no buy at all — while
+# reliability climbs with size ($250k-1m ~72%, $1m+ ~75%). A $50k floor drops the noise
+# at essentially no cost to return (198 -> 174 trades, same +24% / 80%). Set to 0 to
+# count any director buy.
+DIRECTOR_BUY_MIN_VAL = 50000
 
 
 def has_director_buy(director_buy) -> bool:
     return director_buy is True or str(director_buy).strip().lower() == "true"
+
+
+def director_buy_ok(director_buy, director_buy_val=None) -> bool:
+    """Director-buy hard filter WITH the size floor. Counts only if a director bought AND
+    the $ size clears DIRECTOR_BUY_MIN_VAL. Fails OPEN on unknown size (None) so a missing
+    value never silently drops a genuine buy."""
+    if not has_director_buy(director_buy):
+        return False
+    if director_buy_val is None or not DIRECTOR_BUY_MIN_VAL:
+        return True
+    try:
+        return float(director_buy_val) >= DIRECTOR_BUY_MIN_VAL
+    except (TypeError, ValueError):
+        return True
 
 
 # ---- Valuation gate (from the P/E-vs-sector recovery study) ------------------

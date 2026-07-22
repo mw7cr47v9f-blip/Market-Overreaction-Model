@@ -144,9 +144,10 @@ def main():
         d["sector"] = sec
         d["favoured"] = cfg.is_favoured(sec)
         d["avoided"] = cfg.is_avoided(sec)
+        d["sector_ok"] = cfg.is_sector_ok(sec)   # broad gate: keep all EXCEPT avoids
         new_rows.append(d)
-    favoured_new = [d for d in new_rows if d["favoured"]]
-    log(f"favoured-sector: {len(favoured_new)} of {len(new_rows)} new")
+    favoured_new = [d for d in new_rows if d["sector_ok"]]
+    log(f"sector-eligible (all except avoids): {len(favoured_new)} of {len(new_rows)} new")
 
     # Profitability gate (survivorship-free factor study): only alert names that are
     # not deeply loss-making. Needs npat_margin + fcf_margin attached per candidate.
@@ -256,11 +257,14 @@ def main():
                 for d in us_fav:
                     sig = sigs.get((str(d["ticker"]), scan_date), {}) or {}
                     d["director_buy"] = bool(sig.get("director_buy"))
-                    if d["director_buy"]:
+                    d["director_buy_val"] = sig.get("director_buy_val")
+                    if cfg.director_buy_ok(d["director_buy"], d["director_buy_val"]):
                         kept.append(d)
                     else:
-                        log(f"EXCLUDED {d['ticker']}: no prior-6-month director buy")
-                log(f"director-gated (alerted): {len(kept)} of {len(us_fav)} US favoured")
+                        why = "no prior-6-month director buy" if not d["director_buy"] \
+                            else f"director buy below ${cfg.DIRECTOR_BUY_MIN_VAL:,} floor"
+                        log(f"EXCLUDED {d['ticker']}: {why}")
+                log(f"director-gated (alerted): {len(kept)} of {len(us_fav)} US sector-eligible")
                 favoured_new = kept + non_us
             except Exception as e:  # noqa: BLE001
                 log(f"director filter failed (keeping all, UNGATED): {e!r}")
