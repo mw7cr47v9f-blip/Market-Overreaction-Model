@@ -17,7 +17,8 @@ import sys
 
 _BASE = "https://eodhd.com/api"
 # screener market -> EODHD exchange suffix
-_EXCHANGE = {"US": "US", "ASX": "AU", "TSX": "TO", "LSE": "LSE", "FTSE": "LSE"}
+_EXCHANGE = {"US": "US", "ASX": "AU", "TSX": "TO", "LSE": "LSE", "FTSE": "LSE",
+             "TSE": "TSE", "SGX": "SG", "SEHK": "HK"}   # Tokyo / Singapore / Hong Kong
 
 # OTC / pink-sheet markers in EODHD's per-symbol "Exchange" field. Names on these
 # venues are illiquid by definition and would fail the model's liquidity floor
@@ -259,9 +260,28 @@ def parse_eod(js):
 # zero is diagnosable — a swallowed exception told us nothing last time.
 _eod_diag_budget = 6
 
+# Quota tracking. EODHD returns HTTP 402 ("You exceeded your daily API requests
+# limit") once the 100k/day allowance is spent (resets 00:00 UTC). A 402 is NOT a
+# per-ticker data problem — it means EVERY subsequent fetch will also fail, so the
+# caller must abort rather than grind through the whole universe producing a
+# near-empty, misleading dataset. These counters let run_eodhd detect that.
+_http_402 = 0
+_http_ok = 0
+
+
+def quota_stats():
+    """(n_402, n_ok) since the last reset — lets the orchestrator spot an
+    exhausted daily quota and stop early with a clear message."""
+    return _http_402, _http_ok
+
+
+def reset_quota_stats():
+    global _http_402, _http_ok
+    _http_402 = _http_ok = 0
+
 
 def eod_series(code, market, start, end, session=None):
-    global _eod_diag_budget
+    global _eod_diag_budget, _http_402, _http_ok
     import requests
     ex = _EXCHANGE.get(market, "US")
     sess = session or requests
@@ -269,6 +289,10 @@ def eod_series(code, market, start, end, session=None):
         r = sess.get(f"{_BASE}/eod/{code}.{ex}",
                      params={"from": start, "to": end, "period": "d",
                              "api_token": token(), "fmt": "json"}, timeout=30)
+        if r.status_code == 402:
+            _http_402 += 1
+        elif r.status_code == 200:
+            _http_ok += 1
         if r.status_code != 200:
             if _eod_diag_budget > 0:
                 log(f"EOD {code}.{ex} HTTP {r.status_code}: {r.text[:200]!r}")

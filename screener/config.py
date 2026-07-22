@@ -13,9 +13,11 @@ from types import SimpleNamespace
 
 Z_THRESHOLD = -2.5           # window return <= this many SD below zero
 INDEX_REL_THRESHOLD = -0.10  # underperform benchmark by >= 10pp
-ABS_DROP_THRESHOLD = -0.15   # raw decline >= 15% (tightened from 10%: backtest showed
-                             # the edge is concentrated in deeper drops — 10-15% falls
-                             # barely beat the market, 15-30% falls win ~65-70%)
+ABS_DROP_THRESHOLD = -0.20   # raw decline >= 20%. The credit-line study showed return
+                             # scales hard with drop depth: 15-20% falls recover ~+10%,
+                             # 20-30% ~+16%, 30-60% ~+30%. Raising the floor to 20% roughly
+                             # doubles the return on a fixed facility (fewer, deeper, higher-
+                             # win trades); the multi-market build offsets the lower count.
 MAX_DROP_FLOOR = -0.60       # ignore drops WORSE than this. A >60% fall in <=5 days is
                              # a solvency event / delisting / data discontinuity, not an
                              # overreaction to bad news. The survivorship-free backtest
@@ -154,6 +156,35 @@ def is_value_ok(earnings_yield, raw, sector) -> bool:
     return pe <= VALUE_REL_PE_MAX * m
 
 
+# ---- Conviction-weighted position sizing (credit-line study) -----------------
+# On a fixed facility, return = per-trade return x turnover, and the return lives in the
+# deepest, cheapest drops. Rather than equal-weight, size each stake by conviction — drop
+# depth x cheapness-vs-sector — which lifted the capital-weighted return ~+2.3pts (13.5%
+# -> 15.8%) with NO change to the trade set. The screen emits this weight; size the stake
+# relative to it. Weight ~1.0 is a normal position; the clips bound concentration.
+USE_CONVICTION_WEIGHT = True
+
+
+def conviction_weight(raw, earnings_yield, sector) -> float:
+    """Relative position size for a confirmed buy. Deeper drops and cheaper-vs-sector
+    names get a bigger stake; bounded so no single trade dominates the facility. Missing
+    valuation -> cheapness factor 1.0 (neutral). Returns a multiplier centred near 1."""
+    if not USE_CONVICTION_WEIGHT:
+        return 1.0
+    try:
+        drop = abs(float(raw))
+    except (TypeError, ValueError):
+        return 1.0
+    depth = min(max(drop / 0.20, 0.5), 2.5)          # normalise to the 20% floor
+    cheap = 1.0
+    pe = predrop_pe(earnings_yield, raw)
+    if pe is not None:
+        m = _sector_pe_median(sector)
+        if m:
+            cheap = min(max(1.5 - pe / m, 0.5), 2.0)  # cheaper than sector -> bigger
+    return round(depth * cheap, 3)
+
+
 def is_quality(npat_margin, fcf_margin) -> bool:
     """Profitability gate. None (fundamentals missing) fails CLOSED — if we can't
     prove a name isn't deeply loss-making, we don't trade it. Returns True only when
@@ -217,6 +248,42 @@ MARKETS = {
         "large_cap_cutoff": 5_000_000_000,   # >= £5bn -> FTSE 100
         "benchmark_large": "^FTSE",          # FTSE 100
         "benchmark_small": "^FTMC",          # FTSE 250 (mid/small proxy for overreaction cohort)
+        "universe": "eodhd",
+        "announcements": "none",
+    },
+    # Asian expansion (backtest only for now) — no SEC-style insider data, so they run the
+    # gated model (director applied live by analogy). Added to fatten the trade count that
+    # the 20% drop floor thins. EODHD exchange codes: TSE / SG / HK.
+    "TSE": {                                 # Tokyo (Japan)
+        "suffix": ".T",
+        "currency": "JPY",
+        "min_market_cap": 20_000_000_000,    # >= ¥20bn (~US$130m)
+        "min_avg_daily_value": 50_000_000,   # ¥/day liquidity floor
+        "large_cap_cutoff": 1_000_000_000_000,  # >= ¥1tn -> Nikkei
+        "benchmark_large": "^N225",          # Nikkei 225
+        "benchmark_small": "^N225",          # (no reliable free JP small-cap index; proxy)
+        "universe": "eodhd",
+        "announcements": "none",
+    },
+    "SGX": {                                 # Singapore
+        "suffix": ".SI",
+        "currency": "SGD",
+        "min_market_cap": 200_000_000,       # >= S$200m
+        "min_avg_daily_value": 300_000,      # S$/day liquidity floor
+        "large_cap_cutoff": 5_000_000_000,   # >= S$5bn -> STI
+        "benchmark_large": "^STI",           # Straits Times Index
+        "benchmark_small": "^STI",
+        "universe": "eodhd",
+        "announcements": "none",
+    },
+    "SEHK": {                                # Hong Kong
+        "suffix": ".HK",
+        "currency": "HKD",
+        "min_market_cap": 1_000_000_000,     # >= HK$1bn (~US$130m)
+        "min_avg_daily_value": 3_000_000,    # HK$/day liquidity floor
+        "large_cap_cutoff": 40_000_000_000,  # >= HK$40bn -> Hang Seng
+        "benchmark_large": "^HSI",           # Hang Seng
+        "benchmark_small": "^HSI",
         "universe": "eodhd",
         "announcements": "none",
     },

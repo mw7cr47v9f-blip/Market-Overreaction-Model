@@ -29,6 +29,10 @@ from . import us_insiders
 from . import eodhd
 
 H3, H6 = 63, 126           # ~3 and ~6 trading months
+# Fixed-hold horizons (trading days) for the hold-period study: ~3, 4, 6, 8 weeks.
+# CLEAN unconditional holds (unlike the ce_te* recovery-or-cut exits) so we can test
+# whether a shorter hold recycles the credit facility faster for a higher return on it.
+HOLD_GRID_D = (15, 21, 30, 42)
 COOLDOWN = 21              # trading days between distinct events for one name
 # Backtest keeps a WIDER 10% net than the live screen's 15% floor, so we can still
 # bucket by drop size and re-confirm the deeper-is-better finding on future runs.
@@ -180,6 +184,11 @@ def entry_timing_fields(close, volume, bench, ev):
             out[f"{rule}_fwd3m"] = f3          # confirmed-entry 3-month hold (the exact stack)
             out[f"{rule}_exc3m"] = e3
             out[f"{rule}_days"] = ep - i
+            if rule == "confirmed":            # clean fixed-hold returns for the hold-period study
+                for N in HOLD_GRID_D:
+                    fN, eN = _fwd(close, bench, ep, N)
+                    out[f"confirmed_fwd{N}d"] = fN
+                    out[f"confirmed_exc{N}d"] = eN
     return out
 
 
@@ -668,7 +677,8 @@ def summarise(df):
     out = {"n_events": int(len(df)), "by_metric": {}}
     for tag in ("3m", "6m"):
         col = f"fwd_{tag}"; ex = f"excess_{tag}"
-        s = df[col].dropna()
+        if col not in df.columns or ex not in df.columns:
+            continue
         out[f"baseline_{tag}"] = _stat(df, col, ex)
     def buckets(name, series, edges, labels):
         res = {}
@@ -680,22 +690,27 @@ def summarise(df):
                                  "3m": _stat(sub, "fwd_3m", "excess_3m"),
                                  "6m": _stat(sub, "fwd_6m", "excess_6m")}
         return res
-    # profitability (boolean)
-    out["by_metric"]["profitable"] = {}
-    for lab, val in (("yes", True), ("no", False)):
-        sub = df[df["profitable"] == val]
-        if len(sub) >= 5:
-            out["by_metric"]["profitable"][lab] = {"n": int(len(sub)),
-                "3m": _stat(sub, "fwd_3m", "excess_3m"), "6m": _stat(sub, "fwd_6m", "excess_6m")}
-    out["by_metric"]["roe"] = buckets("roe", df["roe"], [-np.inf, 0, .05, .10, .15, np.inf],
-                                      ["<0", "0-5%", "5-10%", "10-15%", ">15%"])
-    out["by_metric"]["de"] = buckets("de", df["de"], [-np.inf, .3, .75, 1.25, np.inf],
-                                     ["<0.3", "0.3-0.75", "0.75-1.25", ">1.25"])
+    # profitability (boolean). Guarded: a quota-starved / fundamentals-less run may
+    # have no 'profitable' column at all — skip rather than KeyError-crash.
+    if "profitable" in df.columns:
+        out["by_metric"]["profitable"] = {}
+        for lab, val in (("yes", True), ("no", False)):
+            sub = df[df["profitable"] == val]
+            if len(sub) >= 5:
+                out["by_metric"]["profitable"][lab] = {"n": int(len(sub)),
+                    "3m": _stat(sub, "fwd_3m", "excess_3m"), "6m": _stat(sub, "fwd_6m", "excess_6m")}
+    if "roe" in df.columns:
+        out["by_metric"]["roe"] = buckets("roe", df["roe"], [-np.inf, 0, .05, .10, .15, np.inf],
+                                          ["<0", "0-5%", "5-10%", "10-15%", ">15%"])
+    if "de" in df.columns:
+        out["by_metric"]["de"] = buckets("de", df["de"], [-np.inf, .3, .75, 1.25, np.inf],
+                                         ["<0.3", "0.3-0.75", "0.75-1.25", ">1.25"])
     if "ey_minus_bond" in df:
         out["by_metric"]["ey_minus_bond"] = buckets("eyb", df["ey_minus_bond"],
             [-np.inf, 0, .03, .06, np.inf], ["<0", "0-3%", "3-6%", ">6%"])
-    out["by_metric"]["momentum_6m"] = buckets("mom", df["momentum_6m"],
-        [-np.inf, -.1, 0, .2, np.inf], ["<-10%", "-10-0%", "0-20%", ">20%"])
+    if "momentum_6m" in df.columns:
+        out["by_metric"]["momentum_6m"] = buckets("mom", df["momentum_6m"],
+            [-np.inf, -.1, 0, .2, np.inf], ["<-10%", "-10-0%", "0-20%", ">20%"])
     # the five quality factors under test — each bucket reports hit-rate AND mean/excess
     for fac, edges, labs in (
         ("npat_margin", [-np.inf, 0, .05, .10, .20, np.inf], ["<0", "0-5%", "5-10%", "10-20%", ">20%"]),
@@ -707,8 +722,9 @@ def summarise(df):
         if fac in df.columns and df[fac].notna().any():
             out["by_metric"][fac] = buckets(fac, df[fac], edges, labs)
     # drop-size buckets — the strongest lever
-    out["by_metric"]["drop_size"] = buckets("raw", df["raw"],
-        [-np.inf, -.30, -.20, -.15, -.10], [">30%", "20-30%", "15-20%", "10-15%"])
+    if "raw" in df.columns:
+        out["by_metric"]["drop_size"] = buckets("raw", df["raw"],
+            [-np.inf, -.30, -.20, -.15, -.10], [">30%", "20-30%", "15-20%", "10-15%"])
     # industry / sector breakdown (>=20 events per sector)
     if "sector" in df.columns and df["sector"].notna().any():
         out["by_sector"] = {}
@@ -902,11 +918,24 @@ def run_eodhd(years, data_dir, limit=0, exchanges=("NYSE",), market="US"):
     # Pass 1 — stream every ticker (incl. delisted); keep prices only for names with events.
     evmap, pxcache = {}, {}
     codes = list(uni["code"])
+    eodhd.reset_quota_stats()
     t0 = time.time()
     scanned, overlap_logged = 0, False
     for i, code in enumerate(codes):
         px = eodhd.eod_series(code, market, start_s, end_s, session=s)
         time.sleep(0.02)
+        # EODHD daily quota (100k calls, resets 00:00 UTC) exhausted -> every
+        # remaining fetch will 402 too. Bail out NOW rather than spend 13 min
+        # producing a near-empty dataset that then crashes downstream. Only judge
+        # after a small sample so a couple of transient 402s don't trip it.
+        n402, nok = eodhd.quota_stats()
+        if n402 >= 20 and n402 > nok * 4:
+            log(f"ABORT: EODHD daily quota exhausted — {n402} HTTP-402s vs {nok} OK "
+                f"in the first {i+1} fetches. The 100k/day allowance resets at 00:00 UTC "
+                f"(08:00 Perth). Re-run after the reset. No results written.")
+            raise SystemExit(
+                "EODHD daily API quota exhausted (HTTP 402). Wait for the 00:00 UTC "
+                "reset (08:00 Perth) and re-run — this is not a code or data fault.")
         if px is None or len(px) < need:
             continue
         px = px[~px.index.duplicated(keep="last")].sort_index()

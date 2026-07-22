@@ -188,6 +188,7 @@ def classify_window(filings: list[dict], event_date: str, lookback_days: int = L
     buy_n = sell_n = 0
     buy_val = sell_val = 0.0
     dir_buy_n = dir_sell_n = 0
+    dir_buy_val = 0.0          # director-only open-market buy $ (the "conviction size" test)
     for f in filings:
         fd = _to_date(f.get("filing_date"))
         if fd is not None and fd > ev:          # not yet public at event time
@@ -205,6 +206,7 @@ def classify_window(filings: list[dict], event_date: str, lookback_days: int = L
                 buy_val += val
                 if is_dir:
                     dir_buy_n += 1
+                    dir_buy_val += val
             elif code in SELL_CODES:
                 sell_n += 1
                 sell_val += val
@@ -216,6 +218,7 @@ def classify_window(filings: list[dict], event_date: str, lookback_days: int = L
         "insider_buy_val": round(buy_val, 2), "insider_sell_val": round(sell_val, 2),
         "insider_net_val": round(net_val, 2),
         "director_buy": dir_buy_n > 0, "director_sell": dir_sell_n > 0,
+        "director_buy_val": round(dir_buy_val, 2),   # $ size of director open-market buys
         "insider_signal": net_signal(buy_n, sell_n, net_val),
     }
 

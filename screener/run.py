@@ -202,6 +202,12 @@ def main():
         log(f"value-gated (alerted): {len(kept)} of {len(favoured_new)} favoured")
         favoured_new = kept
 
+    # Conviction weight (relative position size): deeper, cheaper drops get a bigger stake.
+    if cfg.USE_CONVICTION_WEIGHT:
+        for d in favoured_new:
+            d["conviction_weight"] = cfg.conviction_weight(
+                d.get("raw_return", d.get("raw")), d.get("earnings_yield"), d.get("sector"))
+
     # Structural-trigger hard filter (8-K study): drop names whose fall was caused by a
     # lost contract / impairment / distress event — those don't mean-revert. Fails OPEN:
     # only a positively-identified structural 8-K excludes a name; 'none'/other are kept.
