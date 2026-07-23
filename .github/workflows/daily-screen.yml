@@ -1,17 +1,20 @@
 name: ASX overreaction daily screen
 
-# Runs a few hours AFTER the US close, once the daily bar has settled in the price
-# feed. The previous 21:15 UTC schedule fired only ~15-75 min after the close, before
-# yfinance had published the just-closed session, so the report was built on the PRIOR
-# day's close. 00:30 UTC = ~4.5h after the summer close (20:00 UTC) / ~3.5h after the
-# winter close (21:00 UTC) — yfinance reliably has the just-closed session by then, so
-# the report is always the session that just ended. GitHub cron is UTC and ignores DST.
+# Runs a few hours AFTER the US close, once the daily bar has settled in the price feed.
+# 23:30 UTC is ~2.5h after the winter close (21:00 UTC) / ~3.5h after the summer close
+# (20:00 UTC) — yfinance reliably has the just-closed session by then, so the report is
+# always the session that just ended, not the prior day. 23:30 UTC = 07:30 Perth (UTC+8),
+# so the screen + email land an hour before the 08:30 Perth daily analysis. GitHub cron is
+# UTC and ignores DST.
 on:
   schedule:
-    # 00:30 UTC Tue-Sat covers the Mon-Fri US closes: a close at 20:00-21:00 UTC is
-    # reported at 00:30 UTC the NEXT calendar day (Mon close -> Tue run, Fri -> Sat).
-    # 00:30 UTC = 08:30 Perth, so the email is waiting when Keegan wakes.
-    - cron: "30 0 * * 2-6"
+    # 23:30 UTC Mon-Fri screens each Mon-Fri US close on the SAME UTC day (the close at
+    # 20:00-21:00 UTC is screened ~2.5-3.5h later, still that UTC day). 23:30 UTC = 07:30
+    # Perth the NEXT morning (Mon close -> Tue 07:30 Perth, Fri close -> Sat). The email
+    # lands first; the 08:30 Perth daily analysis reads the fresh commit an hour later.
+    # NOTE: GitHub's scheduler is best-effort and can delay or skip a scheduled run under
+    # load — if a morning looks stale, dispatch this workflow by hand from the Actions tab.
+    - cron: "30 23 * * 1-5"
   workflow_dispatch: {}   # lets you run it by hand from the Actions tab
 
 permissions:
