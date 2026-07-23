@@ -796,9 +796,11 @@ def run(markets, years, data_dir, limit=0):
             uni = uni.head(limit)
         prices = datamod.download_prices(list(uni["yahoo"]), period_days=int(years*365)+260)
         benches = datamod.download_benchmarks(mcfg, period_days=int(years*365)+260)
-        bench = benches.get(mcfg.BENCHMARK_300)      # None or a pandas Series
+        # LARGE-cap benchmark (S&P 500 for US) — the universe is cap-floored (>=$1bn US),
+        # so alpha is measured vs large caps, not the Russell 2000 small-cap index.
+        bench = benches.get(mcfg.BENCHMARK_200)
         if bench is None:
-            bench = benches.get(mcfg.BENCHMARK_200)
+            bench = benches.get(mcfg.BENCHMARK_300)
         if bench is None:
             log(f"{name}: no benchmark, skipping"); continue
         name_by = dict(zip(uni["yahoo"], uni["name"])); code_by = dict(zip(uni["yahoo"], uni["code"]))
@@ -912,15 +914,17 @@ def run_eodhd(years, data_dir, limit=0, exchanges=("NYSE",), market="US"):
         uni = uni.head(limit)
         log(f"PROBE MODE: processing {len(uni)} of {full_n} tickers to measure per-ticker cost")
     benches = datamod.download_benchmarks(mcfg, period_days=int(years * 365) + 400)
-    bench = benches.get(mcfg.BENCHMARK_300)
+    # LARGE-cap benchmark (S&P 500 for US) — the universe is cap-floored, not small-cap,
+    # so excess/alpha is measured vs the large-cap index (was Russell 2000; corrected).
+    bench = benches.get(mcfg.BENCHMARK_200)
     if bench is None:
-        bench = benches.get(mcfg.BENCHMARK_200)
+        bench = benches.get(mcfg.BENCHMARK_300)
     if bench is None:
         log("no benchmark, aborting"); return
     # yfinance daily bars may be tz-aware; EODHD prices are tz-naive. Align the
     # benchmark to a tz-naive daily index so index-relative drops are not all-NaN.
     bench = to_naive_daily(bench)
-    log(f"benchmark {mcfg.BENCHMARK_300}: {len(bench)} points, "
+    log(f"benchmark {mcfg.BENCHMARK_200}: {len(bench)} points, "
         f"{bench.index.min().date()}..{bench.index.max().date()} (tz-naive)")
     name_by = dict(zip(uni["code"], uni["name"]))
     need = cfg.VOL_LOOKBACK + max(cfg.WINDOW_LENGTHS) + 5
