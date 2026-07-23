@@ -190,24 +190,27 @@ def _gate_stack(cand, llm):
     fcf_txt = _pct(fcf) if fcf is not None else "per screen"
     dval = cand.get("director_buy_val")
     dtxt = f"${float(dval):,.0f}" if dval else "confirmed"
+    # LABELS ARE DELIBERATELY BARE — the gate NAMES only, never the thresholds, so a
+    # report that leaves Keegan's hands doesn't hand over the model's definitions. The
+    # full thresholds live in the methodology document, not on the daily report.
     stack = [
-        ["Drop ≥20%", _pct(cand.get("raw_return")), 1],
-        ["Stock-specific ≤−10pp", _pct(cand.get("index_relative"), "pp"), 1],
-        ["Dislocation z ≤−2.5", _znum(cand.get("z_score")), 1],
-        ["Liquidity floor", _human_money(cand.get("avg_daily_value")) + "/day", 1],
-        ["Broad sector", cand.get("sector") or "broad", 1],
-        ["NPAT margin ≥−5%", npat_txt, npat_ok],
-        ["Free cash flow ≥0", fcf_txt, fcf_ok],
+        ["Drop", _pct(cand.get("raw_return")), 1],
+        ["Stock specific", _pct(cand.get("index_relative"), "pp"), 1],
+        ["Dislocation", _znum(cand.get("z_score")), 1],
+        ["Liquidity", _human_money(cand.get("avg_daily_value")) + "/day", 1],
+        ["Sector", cand.get("sector") or "broad", 1],
+        ["NPAT Margin", npat_txt, npat_ok],
+        ["Free Cash Flow", fcf_txt, fcf_ok],
     ]
     if llm:
         gc = llm.get("going_concern") or {}
         ht = llm.get("halt") or {}
-        stack += [["No structural trigger", str(gc.get("text", "clear")), 1 if gc.get("ok", 1) else 0],
-                  ["Not halted", str(ht.get("text", "no")), 1 if ht.get("ok", 1) else 0]]
+        stack += [["Structural trigger", str(gc.get("text", "clear")), 1 if gc.get("ok", 1) else 0],
+                  ["Trade Halt", str(ht.get("text", "no")), 1 if ht.get("ok", 1) else 0]]
     else:
-        stack += [["No structural trigger", "not checked", 1],
-                  ["Not halted", "not checked", 1]]
-    stack.append(["Director buy ≥$50k", dtxt, 1])
+        stack += [["Structural trigger", "not checked", 1],
+                  ["Trade Halt", "not checked", 1]]
+    stack.append(["Director Buy", dtxt, 1])
     return stack
 
 
