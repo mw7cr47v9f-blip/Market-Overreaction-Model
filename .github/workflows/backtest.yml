@@ -55,14 +55,36 @@ jobs:
           SEC_USER_AGENT: "Market-Overreaction-Backtest research keegancrage@icloud.com"
           EODHD_API_TOKEN: ${{ secrets.EODHD_API_TOKEN }}
         run: python -m screener.backtest_factor --years "${{ inputs.years }}" --markets "${{ inputs.markets }}" --source "${{ inputs.source }}" --limit "${{ inputs.limit }}" --exchanges "${{ inputs.exchanges }}" --market "${{ inputs.market }}" --data-dir data
+
+      - name: Upload events artifact (safety net)
+        # Runs even if the backtest or commit fails, so a 30-min run + EODHD quota is
+        # NEVER lost to a git hiccup again. Download the CSV straight from the run page.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backtest-events-${{ inputs.market }}-${{ github.run_id }}
+          path: |
+            data/backtest_events.csv
+            data/backtest_summary.json
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Commit results
         run: |
           git config user.name  "asx-screen-bot"
           git config user.email "actions@github.com"
+          # Keep a market-tagged copy so consecutive market runs don't clobber each other.
           if [ -f data/backtest_events.csv ]; then
             cp data/backtest_events.csv "data/backtest_events_${{ inputs.market }}.csv"; fi
-          git add "data/backtest_events_${{ inputs.market }}.csv"
-          if git diff --cached --quiet; then echo "No changes."; else
+          # Stage EVERYTHING under data/ (not just the tagged file) so the run's other
+          # outputs aren't left unstaged — an unstaged file makes `pull --rebase` abort.
+          git add -A data
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
             git commit -m "Factor backtest ${{ inputs.market }} $(date -u +%Y-%m-%d)"
-            git pull --rebase origin main
-            git push; fi
+            # --autostash: tuck away any stray unstaged change during the rebase, then
+            # reapply — belt-and-suspenders against the "unstaged changes" abort.
+            git pull --rebase --autostash origin main
+            git push
+          fi
