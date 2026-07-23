@@ -43,11 +43,11 @@ UNIVERSE = pd.DataFrame({
                "Information Technology", "Materials"],
 })
 PRICES = {
-    "AAA.AX":  _df(_crash_last(_quiet(N, 0.01, seed=1), -0.18), 5_000_000),   # mid cap crash
-    "BIG.AX":  _df(_crash_last(_quiet(N, 0.01, seed=2), -0.22), 5_000_000),   # large cap crash (clears 20% floor)
-    "SML.AX":  _df(_crash_last(_quiet(N, 0.01, seed=3), -0.18), 5_000_000),   # sub-$100m -> drop
+    "AAA.AX":  _df(_crash_last(_quiet(N, 0.01, seed=1), -0.26), 5_000_000),   # mid cap crash (clears 22% floor)
+    "BIG.AX":  _df(_crash_last(_quiet(N, 0.01, seed=2), -0.25), 5_000_000),   # large cap crash (clears 22% floor)
+    "SML.AX":  _df(_crash_last(_quiet(N, 0.01, seed=3), -0.26), 5_000_000),   # sub-$100m -> filtered by cap
     "CALM.AX": _df(_quiet(N, 0.01, seed=4), 5_000_000),                       # no crash
-    "AVOI.AX": _df(_crash_last(_quiet(N, 0.01, seed=5), -0.24), 5_000_000),   # crash but AVOID sector (clears 20% floor)
+    "AVOI.AX": _df(_crash_last(_quiet(N, 0.01, seed=5), -0.28), 5_000_000),   # crash but AVOID sector (clears 22% floor)
 }
 BENCHES = {cfg.BENCHMARK_200: pd.Series(_quiet(N, 0.003, 7000, 99), index=IDX),
            cfg.BENCHMARK_300: pd.Series(_quiet(N, 0.003, 7000, 98), index=IDX)}

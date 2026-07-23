@@ -13,11 +13,12 @@ from types import SimpleNamespace
 
 Z_THRESHOLD = -2.5           # window return <= this many SD below zero
 INDEX_REL_THRESHOLD = -0.10  # underperform benchmark by >= 10pp
-ABS_DROP_THRESHOLD = -0.20   # raw decline >= 20%. The credit-line study showed return
-                             # scales hard with drop depth: 15-20% falls recover ~+10%,
-                             # 20-30% ~+16%, 30-60% ~+30%. Raising the floor to 20% roughly
-                             # doubles the return on a fixed facility (fewer, deeper, higher-
-                             # win trades); the multi-market build offsets the lower count.
+ABS_DROP_THRESHOLD = -0.22   # raw decline >= 22% (APPROVED baseline — see GATES.md).
+                             # The credit-line study showed return scales hard with drop
+                             # depth: 15-20% falls recover ~+10%, 20-30% ~+16%, 30-60%
+                             # ~+30%. 22% concentrates on the deeper, higher-win trades;
+                             # the multi-market build offsets the lower count. Toggle only
+                             # against the frozen GATES.md baseline.
 MAX_DROP_FLOOR = -0.60       # ignore drops WORSE than this. A >60% fall in <=5 days is
                              # a solvency event / delisting / data discontinuity, not an
                              # overreaction to bad news. The survivorship-free backtest
