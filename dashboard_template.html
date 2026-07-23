@@ -86,6 +86,14 @@ const DATA = {
     sells_due: {v:0, s:"none today"},
     win_rate: {v:"—", s:"no closes yet"}
   },
+  // Confirmed-entry BUYS today (breakout fired) — from confirmations.json confirmed_today.
+  confirmed_today: [
+    { tk:"IBM", mk:"US", sector:"Information Technology", entry:214.50, drop_date:"8 Jul 2026" }
+  ],
+  // Gated drops still inside the 15-day confirmation window — not yet bought.
+  pending: [
+    { tk:"PNR", sector:"Industrials", day:9, drop_date:"6 Jul 2026" }
+  ],
   candidates: [
     { tk:"IBM", mk:"US", name:"IBM", sector:"Information Technology", status:"judge",
       drop:"−26.7%", idx:"−26.0pp", z:"−4.30", window:"4 days · 13–17 Jul",
@@ -143,6 +151,16 @@ function render(){
   tiles.style.gridTemplateColumns='repeat(3,1fr)';
   A.appendChild(tiles);
 
+  // BUY today — every gated drop is bought on the drop (no confirmation wait)
+  const cf=d.confirmed_today||[];
+  if(cf.length){
+    A.appendChild($(`<h2 style="color:#0f766e">Buy now — dropped ≥20% and cleared every gate</h2>`));
+    A.appendChild($(`<div class="note">These names dropped ≥20% and cleared every gate today. The model buys on the drop and holds three months — it does not wait for a confirmation breakout.</div>`));
+    cf.forEach(c=>A.appendChild($(`<div class="card" style="border-left:4px solid #0f766e">
+      <span class="tk">${c.tk}</span> <span class="mk">${c.mk||'US'}</span> &middot; <b>${c.sector||''}</b>
+      — bought @ <b>${c.entry!=null?c.entry:'—'}</b> (dropped ${c.drop_date||'—'})</div>`)));
+  }
+
   // candidates
   A.appendChild($(`<h2>Candidates — ${d.scan_date}</h2>`));
   d.candidates.forEach(c=>{
@@ -166,7 +184,7 @@ function render(){
       <div style="font-size:13px">${c.detail}</div>
       <div class="lab">Implied vs actual</div><div style="font-size:13px">${c.implied}</div>
       <div class="lab">Director / insider</div><div style="font-size:13px">${c.insider}</div>
-      <div class="lab">Quality gate</div><div class="gate">${gate}</div>
+      <div class="lab">Model gates cleared</div><div class="gate">${gate}</div>
       <div style="margin-top:10px;font-size:12px;color:var(--mut)">Primary sources: ${src}</div>
     </div>`));
   });
