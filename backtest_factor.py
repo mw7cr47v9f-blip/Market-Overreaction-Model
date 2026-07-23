@@ -28,9 +28,6 @@ from . import data as datamod
 
 H3, H6 = 63, 126           # ~3 and ~6 trading months
 COOLDOWN = 21              # trading days between distinct events for one name
-# Backtest keeps a WIDER 10% net than the live screen's 15% floor, so we can still
-# bucket by drop size and re-confirm the deeper-is-better finding on future runs.
-BT_DROP_FLOOR = -0.10
 MOM_LOOKBACK = 126        # 6m pre-drop momentum
 US_BOND_TICKER = "^TNX"    # US 10y yield (yahoo)
 AU_BOND_YIELD = 0.043     # AU 10y proxy (flagged; no clean free daily series)
@@ -59,7 +56,7 @@ def detect_events(close, volume, bench, mcfg, cooldown=COOLDOWN):
         base_vol = vol.shift(w)                      # volatility strictly before the window
         z = wret / (base_vol * math.sqrt(w))
         idxrel = wret - (bench / bench.shift(w) - 1)
-        cond = ((z <= cfg.Z_THRESHOLD) & (wret <= BT_DROP_FLOOR) &
+        cond = ((z <= cfg.Z_THRESHOLD) & (wret <= cfg.ABS_DROP_THRESHOLD) &
                 (idxrel <= cfg.INDEX_REL_THRESHOLD) & (adv >= mcfg.MIN_AVG_DAILY_VALUE))
         upd = cond & (z < best_z)
         best_z = best_z.where(~upd, z)
