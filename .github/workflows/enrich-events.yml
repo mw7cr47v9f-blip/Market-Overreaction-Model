@@ -1,0 +1,70 @@
+name: Enrich events (structural triggers + market cap)
+
+# Adds the two gates that the original backtest events were missing — WITHOUT a full
+# re-run. Runs on an events file already in data/:
+#   1. sec_triggers  -> trigger_primary   (SEC 8-K item codes; US markets only; FREE)
+#   2. backfill_marketcap -> market_cap   (EODHD shares x event-date close; ~2 calls/ticker)
+# Uploads the enriched CSV as an artifact to download and hand back for analysis.
+#
+# Dispatch once per already-run market (US NYSE, US NASDAQ, ASX). The five un-run
+# markets don't need this — they'll emit trigger_primary + market_cap natively.
+on:
+  workflow_dispatch:
+    inputs:
+      events_file:
+        description: "Path to the events CSV in data/ (e.g. data/backtest_events_US.csv)"
+        required: true
+      market:
+        description: "eodhd market for the cap fetch (US / ASX / TSX / LSE / TSE / SGX / SEHK)"
+        default: "US"
+      is_us:
+        description: "Run SEC structural-trigger tagging? (true only for NYSE/NASDAQ)"
+        default: "true"
+      drop_floor:
+        description: "Price the pool at/below this drop (0.20 leaves room to toggle 20-22%)"
+        default: "0.20"
+
+permissions:
+  contents: read
+
+jobs:
+  enrich:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Structural triggers (SEC, US only)
+        if: ${{ inputs.is_us == 'true' }}
+        env:
+          SEC_USER_AGENT: "Market-Overreaction-Enrich research keegancrage@icloud.com"
+        run: |
+          python -m screener.sec_triggers --events "${{ inputs.events_file }}" \
+            --out data/_tagged.csv
+          echo "STAGE=data/_tagged.csv" >> "$GITHUB_ENV"
+
+      - name: No triggers for non-US (pass through)
+        if: ${{ inputs.is_us != 'true' }}
+        run: cp "${{ inputs.events_file }}" data/_tagged.csv && echo "STAGE=data/_tagged.csv" >> "$GITHUB_ENV"
+
+      - name: Market cap back-fill (EODHD)
+        env:
+          EODHD_API_TOKEN: ${{ secrets.EODHD_API_TOKEN }}
+        run: |
+          python -m screener.backfill_marketcap --events data/_tagged.csv \
+            --out data/_enriched.csv --drop-floor "${{ inputs.drop_floor }}"
+
+      - name: Upload enriched events
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: enriched-${{ inputs.market }}-${{ github.run_id }}
+          path: data/_enriched.csv
+          if-no-files-found: warn
+          retention-days: 14
