@@ -37,6 +37,11 @@ COOLDOWN = 21              # trading days between distinct events for one name
 # Backtest keeps a WIDER 10% net than the live screen's 15% floor, so we can still
 # bucket by drop size and re-confirm the deeper-is-better finding on future runs.
 BT_DROP_FLOOR = -0.10
+# Emission z floor — LOOSER than the analysis gate (cfg.Z_THRESHOLD = -2.5) so the
+# milder-dislocation events land in the file and z can be TOGGLED post-hoc without a
+# re-run. The approved analysis still applies z <= -2.5 (see GATES.md); this only
+# controls what gets WRITTEN. The live screen is unaffected — it uses cfg.Z_THRESHOLD.
+BT_EMIT_Z = -1.5
 MOM_LOOKBACK = 126        # 6m pre-drop momentum
 US_BOND_TICKER = "^TNX"    # US 10y yield (yahoo)
 AU_BOND_YIELD = 0.043     # AU 10y proxy (flagged; no clean free daily series)
@@ -81,7 +86,7 @@ def detect_events(close, volume, bench, mcfg, cooldown=COOLDOWN):
         base_vol = vol.shift(w)                      # volatility strictly before the window
         z = wret / (base_vol * math.sqrt(w))
         idxrel = wret - (bench / bench.shift(w) - 1)
-        cond = ((z <= cfg.Z_THRESHOLD) & (wret <= BT_DROP_FLOOR) & (wret >= cfg.MAX_DROP_FLOOR) &
+        cond = ((z <= BT_EMIT_Z) & (wret <= BT_DROP_FLOOR) & (wret >= cfg.MAX_DROP_FLOOR) &
                 (idxrel <= cfg.INDEX_REL_THRESHOLD) & (adv >= mcfg.MIN_AVG_DAILY_VALUE))
         upd = cond & (z < best_z)
         best_z = best_z.where(~upd, z)
@@ -94,10 +99,12 @@ def detect_events(close, volume, bench, mcfg, cooldown=COOLDOWN):
             continue
         last = i
         w = int(best_w.iloc[i])
+        _adv = adv.iloc[i]
         events.append({"pos": i, "date": close.index[i].date().isoformat(),
                        "window_len": w, "z": round(float(best_z.iloc[i]), 3),
                        "raw": round(float(close.iloc[i] / close.iloc[i - w] - 1), 4),
-                       "entry": float(close.iloc[i])})
+                       "entry": float(close.iloc[i]),
+                       "avg_daily_value": (round(float(_adv), 0) if pd.notna(_adv) else None)})
     return events
 
 
@@ -599,6 +606,8 @@ def metrics_for_event(fund, entry_date, entry_price, market):
          "roe": round(ni / eq, 4) if (ni is not None and _pos(eq)) else None,
          "de": round(debt / eq, 4) if (debt is not None and _pos(eq)) else None}
     shares_out = fund.get("shares_out")
+    if shares_out and entry_price:
+        m["market_cap"] = round(float(shares_out) * float(entry_price), 0)  # cap at the event
     if shares_out and entry_price and ni is not None:
         ey = ni / (shares_out * entry_price)
         bond = AU_BOND_YIELD if market == "ASX" else metrics_for_event._us_bond.get(entry_date, 0.043)
@@ -837,7 +846,8 @@ def run(markets, years, data_dir, limit=0):
                              "exchange": exch_by.get(y),
                              "date": ev["date"], "year": int(ev["date"][:4]),
                              "window_len": ev["window_len"], "raw": ev["raw"],
-                             "z": ev["z"], **fm, **et, **xr, **mm, **ins})
+                             "z": ev["z"], "avg_daily_value": ev.get("avg_daily_value"),
+                             **fm, **et, **xr, **mm, **ins})
     _finalise(rows, data_dir, source="yfinance")
 
 
@@ -996,7 +1006,8 @@ def run_eodhd(years, data_dir, limit=0, exchanges=("NYSE",), market="US"):
             rows.append({"market": market, "ticker": code, "name": name_by.get(code, code),
                          "sector": sec, "exchange": f"{market}-SF", "date": ev["date"],
                          "year": int(ev["date"][:4]), "window_len": ev["window_len"],
-                         "raw": ev["raw"], "z": ev["z"], **fm, **et, **xr, **cex, **mm, **ins})
+                         "raw": ev["raw"], "z": ev["z"], "avg_daily_value": ev.get("avg_daily_value"),
+                         **fm, **et, **xr, **cex, **mm, **ins})
         if (j + 1) % 1000 == 0:
             log(f"fundamentals {j+1}/{len(evmap)}")
     _finalise(rows, data_dir, source="eodhd")
