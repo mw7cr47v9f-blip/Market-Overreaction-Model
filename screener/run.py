@@ -20,6 +20,7 @@ want US caught fresher.
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import os
 import sys
@@ -274,35 +275,59 @@ def main():
     statemod.write_new(os.path.join(args.data_dir, "candidates_new.json"), favoured_new, scan_date)
     statemod.save_state(state_path, seen.union({c.key() for c in all_finals}), scan_date)
 
-    # CONFIRMED-ENTRY tracking (closes the live gap): a gated drop is NOT bought on the
-    # fall — it enters a 15-trading-day confirmation window and is BOUGHT only on the
-    # confirmed-entry breakout (close above the prior two-day high on above-average
-    # volume). Names that never confirm are skipped. Uses the SAME rule as the backtest.
-    confirmed_today = []
+    # LOCKED MODEL — BUY ON THE DROP. A gated drop (>=20% & <=60% collapse floor, stock-
+    # specific z<=-2.5 and <=-10pp vs index, broad sector, quality gate, and a >=$50k
+    # prior-6-month director buy) is BOUGHT the day it qualifies and held three months.
+    # The confirmed-entry breakout gate was TESTED AND REMOVED: waiting up to 15 trading
+    # days for the breakout cost alpha, so the model takes its entry on the drop rather
+    # than leaving that return on the table.
+    buys_today = [{"market": c["market"], "ticker": c["ticker"], "name": c.get("name"),
+                   "sector": c.get("sector"), "drop_date": c.get("event_date"),
+                   "entry_date": scan_date, "entry_price": c.get("last_close")}
+                  for c in favoured_new]
+
+    # Drain any names still in the OLD confirmation queue: they qualified on the gates but
+    # were waiting for a breakout we no longer require, and they are already deduped in
+    # state.json so they will NOT reappear as new drops. Buy each at its drop (entry = the
+    # drop date/price, consistent with buy-on-the-drop) and retire the queue. This is
+    # empty on every run after the first one following the change.
+    pend_path = os.path.join(args.data_dir, "pending_confirmations.json")
     try:
-        from . import confirm as confirmmod
-
-        def _series_for(rec):
-            y = yahoo_by_mc.get((rec.get("market"), str(rec.get("ticker")).upper()))
-            df = all_prices.get(y) if y else None
-            if df is None or len(df) == 0:
-                return None
-            return df["Close"], df["Volume"]
-
-        confirmed_today, pending_now, expired_now = confirmmod.update(
-            args.data_dir, favoured_new, _series_for, scan_date)
-        log(f"confirmations: {len(confirmed_today)} confirmed (BUY today), "
-            f"{len(pending_now)} pending, {len(expired_now)} expired/skipped")
+        if os.path.exists(pend_path):
+            with open(pend_path) as f:
+                stale = json.load(f).get("pending", []) or []
+            have = {(b["market"], b["ticker"]) for b in buys_today}
+            for r in stale:
+                if (r.get("market"), r.get("ticker")) in have:
+                    continue
+                buys_today.append({"market": r.get("market"), "ticker": r.get("ticker"),
+                                   "name": r.get("name"), "sector": r.get("sector"),
+                                   "drop_date": r.get("drop_date"),
+                                   "entry_date": r.get("drop_date") or scan_date,
+                                   "entry_price": r.get("drop_price")})
+            if stale:
+                log(f"drained {len(stale)} name(s) from the retired confirmation queue")
+            with open(pend_path, "w") as f:
+                json.dump({"scan_date": scan_date, "pending": []}, f, indent=2)
     except Exception as e:  # noqa: BLE001
-        log(f"confirmation tracking failed: {e!r}")
+        log(f"pending-queue drain failed: {e!r}")
 
-    # BUY/SELL ledger: the model book buys on CONFIRMED entries (entry date + price are
-    # the breakout bar, not the drop), holds three months. Plus personal holdings.
+    # confirmations.json is retained as the buy carrier the email + dashboard read. Under
+    # the locked model every gated drop is a buy the day it lands, so pending/expired are
+    # always empty now (kept so backward-compatible readers don't break).
     try:
-        model_buys = [{"market": c["market"], "ticker": c["ticker"], "name": c.get("name"),
-                       "sector": c.get("sector"),
-                       "entry_date": c.get("entry_date", scan_date),
-                       "entry_price": c.get("entry_price")} for c in confirmed_today]
+        with open(os.path.join(args.data_dir, "confirmations.json"), "w") as f:
+            json.dump({"scan_date": scan_date, "confirmed_today": buys_today,
+                       "pending": [], "expired": []}, f, indent=2)
+    except Exception as e:  # noqa: BLE001
+        log(f"could not write confirmations.json: {e!r}")
+    log(f"buys today (bought on the drop): {len(buys_today)}")
+
+    # BUY/SELL ledger: buy each gated drop at its close, hold three months. Plus holdings.
+    try:
+        model_buys = [{"market": b["market"], "ticker": b["ticker"], "name": b.get("name"),
+                       "sector": b.get("sector"), "entry_date": b["entry_date"],
+                       "entry_price": b["entry_price"]} for b in buys_today]
         model_report = ledgermod.update_model_ledger(args.data_dir, model_buys, price_lookup, scan_date)
         holdings = ledgermod.holdings_status(args.data_dir, price_lookup, scan_date)
         ledgermod.write_status(args.data_dir, model_report, holdings)

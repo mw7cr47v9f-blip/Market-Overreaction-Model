@@ -177,18 +177,38 @@ def _best_filing_url(ann):
 # --------------------------------------------------------------------------- #
 # quality gate + insider (deterministic, from what the screen already computed)
 # --------------------------------------------------------------------------- #
-def _quality_gate(cand):
-    """The two quality rows, built from the screen's companyfacts margins. These
-    names already PASSED the screen's gate, so display fails-open (ok=1) when a
-    margin is unavailable rather than contradicting the screen."""
-    npat = cand.get("npat_margin")
-    fcf = cand.get("fcf_margin")
+def _gate_stack(cand, llm):
+    """The FULL model-gate checklist for a card. Every threshold gate shows as a pass
+    tick because the name is in candidates_new — it cleared the whole stack to get there.
+    NPAT/FCF come from the screen's companyfacts margins (fail-open, ok=1, when a margin
+    is unavailable, so we never contradict the screen). Structural-trigger and halt come
+    from the model's filing read; 'not checked' on the mechanical (no-LLM) path."""
+    npat, fcf = cand.get("npat_margin"), cand.get("fcf_margin")
     npat_ok = 1 if (npat is None or float(npat) >= -0.05) else 0
     fcf_ok = 1 if (fcf is None or float(fcf) >= 0.0) else 0
     npat_txt = _pct(npat) if npat is not None else "per screen"
     fcf_txt = _pct(fcf) if fcf is not None else "per screen"
-    return [["NPAT margin", npat_txt, npat_ok],
-            ["Free cash flow", fcf_txt, fcf_ok]]
+    dval = cand.get("director_buy_val")
+    dtxt = f"${float(dval):,.0f}" if dval else "confirmed"
+    stack = [
+        ["Drop ≥20%", _pct(cand.get("raw_return")), 1],
+        ["Stock-specific ≤−10pp", _pct(cand.get("index_relative"), "pp"), 1],
+        ["Dislocation z ≤−2.5", _znum(cand.get("z_score")), 1],
+        ["Liquidity floor", _human_money(cand.get("avg_daily_value")) + "/day", 1],
+        ["Broad sector", cand.get("sector") or "broad", 1],
+        ["NPAT margin ≥−5%", npat_txt, npat_ok],
+        ["Free cash flow ≥0", fcf_txt, fcf_ok],
+    ]
+    if llm:
+        gc = llm.get("going_concern") or {}
+        ht = llm.get("halt") or {}
+        stack += [["No structural trigger", str(gc.get("text", "clear")), 1 if gc.get("ok", 1) else 0],
+                  ["Not halted", str(ht.get("text", "no")), 1 if ht.get("ok", 1) else 0]]
+    else:
+        stack += [["No structural trigger", "not checked", 1],
+                  ["Not halted", "not checked", 1]]
+    stack.append(["Director buy ≥$50k", dtxt, 1])
+    return stack
 
 
 def _insider_text(cand):
@@ -311,19 +331,13 @@ def _window_str(cand):
 
 def _card(cand, ann, llm):
     """Build the dashboard candidate dict (+ the narrative used by the email)."""
-    gate = _quality_gate(cand)
+    gate = _gate_stack(cand, llm)
     insider = _insider_text(cand)
     sources = _sources_from(ann) or [
         ["SEC EDGAR full-text search",
          f"https://efts.sec.gov/LATEST/search-index?q=%22{cand.get('ticker')}%22"]]
 
     if llm:
-        gc = llm.get("going_concern") or {}
-        ht = llm.get("halt") or {}
-        gate = gate + [
-            ["Going concern", str(gc.get("text", "not stated")), 1 if gc.get("ok", 1) else 0],
-            ["Trading halt", str(ht.get("text", "no")), 1 if ht.get("ok", 1) else 0],
-        ]
         status = llm.get("status") if llm.get("status") in ("over", "judge", "just", "fail") else "judge"
         read = llm.get("read") or ""
         trigger = llm.get("trigger") or "(B) Judgement required"
@@ -332,7 +346,6 @@ def _card(cand, ann, llm):
         # let the model's own insider line win only if it explicitly returned one
         insider = llm.get("insider") or insider
     else:
-        gate = gate + [["Going concern", "not checked", 1], ["Trading halt", "not checked", 1]]
         status = "judge"
         read = (f"Fell {_pct(cand.get('raw_return'))} versus the market "
                 f"({_pct(cand.get('index_relative'), 'pp')}), a "

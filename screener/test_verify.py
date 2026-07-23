@@ -110,9 +110,15 @@ def main():
         check("card idx in pp", c["idx"].endswith("pp"))
         check("card cap humanised", c["cap"].endswith("bn"))
         check("card liq per day", c["liq"].endswith("/day"))
-        check("gate has 4 rows", len(c["gate"]) == 4)
+        check("gate has 10 rows (full stack)", len(c["gate"]) == 10)
         check("gate rows are [label,val,ok]", all(len(g) == 3 for g in c["gate"]))
-        check("quality gate ok (margins pass)", c["gate"][0][2] == 1 and c["gate"][1][2] == 1)
+        labels = [g[0] for g in c["gate"]]
+        check("gate includes drop threshold", any("Drop" in l for l in labels))
+        check("gate includes sector", any("sector" in l.lower() for l in labels))
+        check("gate includes director ≥$50k", any("Director" in l for l in labels))
+        check("quality rows pass (margins ok)",
+              all(g[2] == 1 for g in c["gate"] if "NPAT" in g[0] or "cash flow" in g[0].lower()))
+        check("director gate shows $250k", any("250" in str(g[1]) for g in c["gate"] if "Director" in g[0]))
         check("insider mentions $250k", "250" in c["insider"])
         check("sources carry EDGAR url", c["sources"][0][1].startswith("http"))
         check("confirmed_today mapped", DATA["confirmed_today"][0]["tk"] == "ACME")

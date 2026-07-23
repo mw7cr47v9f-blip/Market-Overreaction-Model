@@ -101,9 +101,9 @@ def main():
         # all three size+price qualifiers (AAA, BIG, AVOI) are de-duped in state
         check("state.json records 3 seen keys", len(json.load(open(os.path.join(d, "state.json")))["seen"]) == 3)
         model = json.load(open(os.path.join(d, "ledger_status.json")))["model"]
-        # Confirmed-entry model: a day-1 crash is PENDING confirmation, not bought, so the
-        # ledger opens 0 today (the two names sit in pending_confirmations until a breakout).
-        check("ledger opens 0 on day-1 crash (confirmed-entry: pending, not bought)", model["n_open"] == 0)
+        # Buy-on-the-drop model: both gated crashes (AAA, BIG) are bought the day they
+        # qualify — no confirmation wait — so the ledger opens 2 today.
+        check("ledger opens 2 on the drop (buy-on-drop: AAA + BIG)", model["n_open"] == 2)
 
         print("Second run (same data) — must dedup to zero new:")
         run_once(d)

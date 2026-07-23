@@ -123,8 +123,7 @@ def build_email(data_dir):
 
     scan_date = conf.get("scan_date") or cand.get("scan_date") or model.get("scan_date") or "today"
     new_drops = cand.get("candidates", []) or []
-    confirmed = conf.get("confirmed_today", []) or []      # BUY today (breakout fired)
-    pending = conf.get("pending", []) or []                # awaiting confirmation (day N/15)
+    confirmed = conf.get("confirmed_today", []) or []      # BUY today (bought on the drop)
     sells = _sells(model)
     hold_due = [h for h in holdings if str(h.get("flag", "")).upper() in ("SELL_DUE", "SELL_SOON")]
     tally = model.get("realised_tally", {}) or {}
@@ -155,9 +154,9 @@ def build_email(data_dir):
     if stale_txt:
         L = [f"!! {stale_txt}", ""] + L
     if confirmed:
-        L.append("** BUY NOW - confirmed entry today (two-day-high breakout on volume) **")
+        L.append("** BUY NOW - dropped >=20% and cleared every gate today (bought on the drop) **")
         for c in confirmed:
-            L.append(f"  {c.get('ticker')} ({c.get('sector','')}) confirmed @ {c.get('entry_price')} "
+            L.append(f"  {c.get('ticker')} ({c.get('sector','')}) bought @ {c.get('entry_price')} "
                      f"- dropped {c.get('drop_date')}")
             L.extend(_narr_text(c.get("ticker"), narr))
         L.append("")
@@ -173,13 +172,6 @@ def build_email(data_dir):
         L.append("")
     if not confirmed and not (sells or hold_due):
         L.append("No buys or sells today.")
-        L.append("")
-    if pending:
-        L.append(f"** AWAITING CONFIRMATION ({len(pending)}) - not yet bought **")
-        for p in pending:
-            L.append(f"  {p.get('ticker')} ({p.get('sector','')}) day {p.get('day','?')}/15 "
-                     f"since drop {p.get('drop_date')}")
-            L.extend(_narr_text(p.get("ticker"), narr))
         L.append("")
 
     if tally.get("n_closed"):
@@ -210,9 +202,9 @@ def build_email(data_dir):
     H.append(f"<h2 style='{ff};color:#0f766e;margin:0 0 2px'>Cragent.ai &middot; End of Trading Day, {esc(nice_date)}</h2>")
     H.append(f"<div style='{ff};color:#5b6470;font-size:12px;margin:0 0 8px'>report generated {esc(gen_utc)}</div>")
     if confirmed:
-        H.append(f"<h3 style='{ff};color:#0f766e;margin:12px 0 4px'>Buy now &mdash; confirmed entry today</h3><ul style='{ff};font-size:14px'>")
+        H.append(f"<h3 style='{ff};color:#0f766e;margin:12px 0 4px'>Buy now &mdash; dropped &ge;20% and cleared every gate (bought on the drop)</h3><ul style='{ff};font-size:14px'>")
         for c in confirmed:
-            H.append(f"<li><b>{esc(c.get('ticker'))}</b> ({esc(c.get('sector',''))}) &mdash; confirmed breakout @ {esc(c.get('entry_price'))}, dropped {esc(c.get('drop_date'))}"
+            H.append(f"<li><b>{esc(c.get('ticker'))}</b> ({esc(c.get('sector',''))}) &mdash; bought @ {esc(c.get('entry_price'))}, dropped {esc(c.get('drop_date'))}"
                      f"{_narr_html(c.get('ticker'), narr, ff, esc)}</li>")
         H.append("</ul>")
     if sells or hold_due:
@@ -224,12 +216,6 @@ def build_email(data_dir):
         H.append("</ul>")
     if not confirmed and not (sells or hold_due):
         H.append(f"<p style='{ff};font-size:14px'>No buys or sells today.</p>")
-    if pending:
-        H.append(f"<h3 style='{ff};margin:12px 0 4px'>Awaiting confirmation ({len(pending)}) &mdash; not yet bought</h3><ul style='{ff};font-size:13px;color:#5b6470'>")
-        for p in pending:
-            H.append(f"<li>{esc(p.get('ticker'))} ({esc(p.get('sector',''))}) — day {esc(p.get('day','?'))}/15 since drop {esc(p.get('drop_date'))}"
-                     f"{_narr_html(p.get('ticker'), narr, ff, esc)}</li>")
-        H.append("</ul>")
     if tally.get("n_closed"):
         H.append(f"<p style='{ff};font-size:13px;color:#5b6470'>Model book: {model.get('n_open',0)} open, {tally.get('n_closed')} closed, win rate {esc(_fmt_pct((tally.get('win_rate') or 0)*100))}, avg {esc(_fmt_pct((tally.get('avg_return') or 0)*100))}.</p>")
     if llm_used:
