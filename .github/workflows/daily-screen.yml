@@ -1,15 +1,17 @@
 name: ASX overreaction daily screen
 
-# Runs after the ASX close on each weekday (Sydney evening). 08:00 UTC is 6pm
-# AEST / 7pm AEDT, comfortably after the 4pm close and late enough to catch
-# post-close price-sensitive announcements. GitHub cron is UTC and does not
-# follow daylight saving; 08:00 UTC stays after the close year-round.
+# Runs a few hours AFTER the US close, once the daily bar has settled in the price
+# feed. The previous 21:15 UTC schedule fired only ~15-75 min after the close, before
+# yfinance had published the just-closed session, so the report was built on the PRIOR
+# day's close. 00:30 UTC = ~4.5h after the summer close (20:00 UTC) / ~3.5h after the
+# winter close (21:00 UTC) — yfinance reliably has the just-closed session by then, so
+# the report is always the session that just ended. GitHub cron is UTC and ignores DST.
 on:
   schedule:
-    # 21:15 UTC weekdays = ~15 min after the US winter close (4pm ET) / ~75 min
-    # after the summer close. The analysis task then runs at 21:45 UTC (= 5:45am
-    # Perth, year-round) so the email is waiting when Keegan wakes.
-    - cron: "15 21 * * 1-5"
+    # 00:30 UTC Tue-Sat covers the Mon-Fri US closes: a close at 20:00-21:00 UTC is
+    # reported at 00:30 UTC the NEXT calendar day (Mon close -> Tue run, Fri -> Sat).
+    # 00:30 UTC = 08:30 Perth, so the email is waiting when Keegan wakes.
+    - cron: "30 0 * * 2-6"
   workflow_dispatch: {}   # lets you run it by hand from the Actions tab
 
 permissions:
@@ -37,9 +39,26 @@ jobs:
         run: python -m screener.run --self-test
 
       - name: Run screen
-        # US S&P 1500 only — the backtest showed the ASX overreaction edge is weak
-        # outside 2020 (sub-50% hit, ~0% excess), so the live model is US-focused.
+        # US locked model, fully aligned to the backtest: NYSE-listed universe (free
+        # GitHub mirror, no EODHD key) + favoured sectors + quality gate + structural-
+        # trigger filter + DIRECTOR-BUY hard filter (REQUIRE_DIRECTOR_BUY=True) +
+        # confirmed-entry tracking. The ASX edge tested weak, so the live model is US-only.
+        env:
+          # SEC companyfacts (profitability gate) + Form 4 (insider) fair-access UA.
+          SEC_USER_AGENT: "Market-Overreaction-Screen research keegancrage@icloud.com"
         run: python -m screener.run --data-dir data --markets US
+
+      - name: Verify & build dashboard
+        # LLM judgement layer on top of the mechanical screen: reads the primary
+        # SEC filings, writes data/verification.json + data/daily_dashboard.html.
+        # FAIL-SOFT — if ANTHROPIC_API_KEY is unset or the API errors, it writes a
+        # mechanical (no-LLM) dashboard and exits 0, so the email always sends.
+        # The dashboard is committed below, giving a retained, log-in-and-view copy.
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CRAGENT_LLM_MODEL: ${{ vars.CRAGENT_LLM_MODEL }}   # optional; defaults to claude-sonnet-5
+          SEC_USER_AGENT: "Market-Overreaction-Screen research keegancrage@icloud.com"
+        run: python -m screener.verify_llm --data-dir data
 
       - name: Commit results
         run: |
@@ -50,5 +69,18 @@ jobs:
             echo "No changes to commit."
           else
             git commit -m "Daily screen $(date -u +%Y-%m-%d)"
+            git pull --rebase origin main
             git push
           fi
+
+      - name: Send daily email
+        # ALWAYS runs — even when the screen found nothing new — because this email
+        # carries the 3-month SELL reminders. Reads data/candidates_new.json +
+        # data/ledger_status.json. Secrets: RESEND_API_KEY, CRAGENT_EMAIL_TO,
+        # CRAGENT_EMAIL_FROM (a verified Resend sender, or onboarding@resend.dev to test).
+        if: always()
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          CRAGENT_EMAIL_TO: ${{ secrets.CRAGENT_EMAIL_TO }}
+          CRAGENT_EMAIL_FROM: ${{ secrets.CRAGENT_EMAIL_FROM }}
+        run: python -m screener.email_report --data-dir data
