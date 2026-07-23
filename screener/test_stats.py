@@ -38,7 +38,7 @@ def _big_vol(n):
 
 N = 140
 BENCH = _flat_bench(N)
-CAP = 800_000_000  # $800m, clears size gate, benchmarked vs ASX 300
+CAP = 800_000_000  # $800m, clears size gate; benchmarked vs the large-cap index (unified)
 
 
 def _apply_crash(close, day_from_end, pct):
@@ -65,7 +65,7 @@ check("raw return ~ -25%", abs(c.raw_return - (-0.25)) < 0.02)
 check("z is deeply negative", c.z_score < -3.0)
 check("index-relative below -10pp", c.index_relative <= -0.10)
 check("event_date == last day", c.event_date == close.index[-1].date().isoformat())
-check("benchmark is ASX300 for mid cap", c.benchmark == cfg.BENCHMARK_300)
+check("mid cap benchmarked vs ASX200 (unified large-cap benchmark)", c.benchmark == cfg.BENCHMARK_200)
 
 print("Case 2: high-vol stock, noisy but no window <= -10% -> NO FLAG")
 close = _quiet_series(N, 0.05, seed=2)  # 5%/day vol, drifts, no single big drop

@@ -66,19 +66,20 @@ def screen_market(name: str, data_dir: str, limit: int = 0):
     shortlist = []
     for y, df in prices.items():
         c = evaluate_series(code_by_y.get(y, y), name_by_y.get(y, y),
-                            df["Close"], df["Volume"], b_small, market_cap=math.inf, cfg=mcfg)
+                            df["Close"], df["Volume"], b_large, market_cap=math.inf, cfg=mcfg)
         if c is not None:
             shortlist.append((y, df))
     log(f"{name}: stage-1 price-qualifying = {len(shortlist)}")
 
-    # Stage 2 — real cap + size gate + size-appropriate benchmark
+    # Stage 2 — real cap + size gate. Benchmark = the LARGE-cap index (S&P 500 for US)
+    # for the WHOLE cap-floored book — unified, not cap-split (was b_large/b_small).
     caps = datamod.get_market_caps([y for y, _ in shortlist]) if shortlist else {}
     finals = []
     for y, df in shortlist:
         cap = caps.get(y)
         if cap is None or cap < mcfg.MIN_MARKET_CAP:
             continue
-        bench = b_large if cap >= mcfg.LARGE_CAP_CUTOFF else b_small
+        bench = b_large
         c = evaluate_series(code_by_y.get(y, y), name_by_y.get(y, y),
                             df["Close"], df["Volume"], bench, market_cap=cap, cfg=mcfg)
         if c is not None:

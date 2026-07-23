@@ -93,7 +93,7 @@ def main():
         check("BIG benchmarked vs ASX200", big["benchmark"] == cfg.BENCHMARK_200)
         check("BIG tagged favoured + sector attached", big.get("favoured") is True and big.get("sector"))
         aaa = next(c for c in new["candidates"] if c["ticker"] == "AAA")
-        check("AAA benchmarked vs ASX300", aaa["benchmark"] == cfg.BENCHMARK_300)
+        check("AAA benchmarked vs ASX200 (unified large-cap benchmark)", aaa["benchmark"] == cfg.BENCHMARK_200)
         allcsv = pd.read_csv(os.path.join(d, "candidates_all.csv"))
         check("candidates_all.csv has status=New", (allcsv["status"] == "New").all())
         check("AVOI logged to candidates_all (not alerted)", "AVOI" in set(allcsv["ticker"]))

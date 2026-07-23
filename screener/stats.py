@@ -162,7 +162,7 @@ def evaluate_series(
         ticker=ticker,
         name=name,
         market_cap=float(market_cap),
-        benchmark=(cfg.BENCHMARK_200 if market_cap >= cfg.LARGE_CAP_CUTOFF else cfg.BENCHMARK_300),
+        benchmark=cfg.BENCHMARK_200,   # unified large-cap benchmark (S&P 500 for US)
         window_len=best["window_len"],
         window_start=best["window_start"].date().isoformat(),
         window_end=run_date.date().isoformat(),
