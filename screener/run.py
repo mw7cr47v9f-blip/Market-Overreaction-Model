@@ -281,9 +281,26 @@ def main():
     # The confirmed-entry breakout gate was TESTED AND REMOVED: waiting up to 15 trading
     # days for the breakout cost alpha, so the model takes its entry on the drop rather
     # than leaving that return on the table.
+    # Entry is booked at the TRIGGER day, not the detection day. The model buys on the
+    # drop, so the forward test records entry_date = the drop day (event_date) and
+    # entry_price = THAT day's close — matching the survivorship-free backtest and the
+    # existing book (e.g. IBM @ its 14 Jul drop close, not today's price). Falls back to
+    # last_close only if the drop-day bar can't be located in the fetched series.
+    def _entry_at_drop(c):
+        y = yahoo_by_mc.get((c.get("market"), str(c.get("ticker")).upper()))
+        df = all_prices.get(y) if y else None
+        try:
+            s = df["Close"].dropna()
+            at = s[s.index <= pd.Timestamp(c.get("event_date"))]
+            if len(at):
+                return round(float(at.iloc[-1]), 4)
+        except Exception:  # noqa: BLE001
+            pass
+        return c.get("last_close")
+
     buys_today = [{"market": c["market"], "ticker": c["ticker"], "name": c.get("name"),
                    "sector": c.get("sector"), "drop_date": c.get("event_date"),
-                   "entry_date": scan_date, "entry_price": c.get("last_close")}
+                   "entry_date": c.get("event_date"), "entry_price": _entry_at_drop(c)}
                   for c in favoured_new]
 
     # Drain any names still in the OLD confirmation queue: they qualified on the gates but
