@@ -1,0 +1,58 @@
+name: Re-classify director buys at 6/12/18/24m (SEC only — NO EODHD)
+
+# Tests whether a longer director-buy lookback recovers conviction cases the
+# 6-month window misses (directors in blackout around the drop). Fetches Form-4
+# bulk data from SEC (FREE — zero EODHD credit), re-classifies each candidate at
+# 6/12/18/24 months, and emits director_buy_val_6m/_12m/_18m/_24m.
+#
+# Input: a candidate events CSV in data/ that already passes every gate EXCEPT
+# the director-buy filter (so the wider window is tested against the full field).
+#
+# Usage: commit data/candidates_nodir.csv, then dispatch with events_file pointing
+# at it. Download the tagged-windows artifact and hand it back for re-gating.
+on:
+  workflow_dispatch:
+    inputs:
+      events_file:
+        description: "Candidate CSV in data/ (passes all gates except director-buy)"
+        default: "data/candidates_nodir.csv"
+      out_file:
+        description: "Output CSV path under data/"
+        default: "data/candidates_nodir_windows.csv"
+      limit:
+        description: "Cap events processed (0 = all)"
+        default: "0"
+
+permissions:
+  contents: read
+
+jobs:
+  reclass:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Re-classify director buys at multiple windows (SEC Form-4 — free)
+        env:
+          SEC_USER_AGENT: "Market-Overreaction-Reclass research keegancrage@icloud.com"
+        run: |
+          python -m screener.reclass_insider \
+            --events "${{ inputs.events_file }}" \
+            --out "${{ inputs.out_file }}" \
+            --limit "${{ inputs.limit }}"
+
+      - name: Upload window-tagged events (artifact — always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-${{ github.run_id }}
+          path: ${{ inputs.out_file }}
+          if-no-files-found: warn
+          retention-days: 14
