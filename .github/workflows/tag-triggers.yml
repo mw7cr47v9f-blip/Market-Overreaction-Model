@@ -7,6 +7,12 @@ name: Tag events with 8-K triggers (manual)
 on:
   workflow_dispatch:
     inputs:
+      events_file:
+        description: "Events CSV already committed under data/ (run once per US file)"
+        default: "data/backtest_events_NYSE.csv"
+      out_file:
+        description: "Output tagged CSV path under data/"
+        default: "data/backtest_events_NYSE_tagged.csv"
       limit:
         description: "Cap events processed (0 = all)"
         default: "0"
@@ -35,11 +41,19 @@ jobs:
       - name: Tag events
         env:
           SEC_USER_AGENT: "Market-Overreaction-Triggers research keegancrage@icloud.com"
-        run: python -m screener.sec_triggers --events data/backtest_events.csv --out data/backtest_events_tagged.csv --limit "${{ inputs.limit }}"
+        run: python -m screener.sec_triggers --events "${{ inputs.events_file }}" --out "${{ inputs.out_file }}" --limit "${{ inputs.limit }}"
+      - name: Upload tagged events (artifact — always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tagged-${{ github.run_id }}
+          path: ${{ inputs.out_file }}
+          if-no-files-found: warn
+          retention-days: 14
       - name: Commit results
         run: |
           git config user.name  "asx-screen-bot"
           git config user.email "actions@github.com"
-          git add data/backtest_events_tagged.csv
+          git add "${{ inputs.out_file }}"
           if git diff --cached --quiet; then echo "No changes."; else
-            git commit -m "Tag events with 8-K triggers $(date -u +%Y-%m-%d)"; git push; fi
+            git commit -m "Tag events with 8-K triggers $(date -u +%Y-%m-%d)"; git pull --rebase --autostash origin main || true; git push; fi
